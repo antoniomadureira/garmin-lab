@@ -1,4 +1,4 @@
-const BASE = "/api";
+const BASE = "http://127.0.0.1:8000";
 
 let _token = localStorage.getItem("garmin_token") || null;
 
