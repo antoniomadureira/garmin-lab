@@ -8,10 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import date, timedelta
 import secrets
+import time
 
 import garminconnect
 
-app = FastAPI(title="Garmin Dashboard API", version="1.0.0")
+app = FastAPI(title="Garmin Dashboard API", version="1.0.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,14 +20,28 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
+        "https://garmin-lab.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ── Sessões em memória (app pessoal mono-utilizador) ──────────────
+# ── Sessões e Cache em memória ────────────────────────────────────
 sessions: dict[str, garminconnect.Garmin] = {}
+api_cache: dict[str, dict] = {}
+CACHE_TTL = 3600  # Tempo de vida da cache em segundos (1 hora)
+
+
+def fetch_with_cache(cache_key: str, fetch_func):
+    """Devolve dados em cache se existirem e forem válidos, senão executa a função."""
+    now = time.time()
+    if cache_key in api_cache and api_cache[cache_key]["expires"] > now:
+        return api_cache[cache_key]["data"]
+    
+    data = fetch_func()
+    api_cache[cache_key] = {"data": data, "expires": now + CACHE_TTL}
+    return data
 
 
 # ── Modelos ───────────────────────────────────────────────────────
@@ -45,8 +60,9 @@ def get_api(request: Request) -> garminconnect.Garmin:
 
 
 # ── Auth endpoints ────────────────────────────────────────────────
+# Nota: Removido o 'async' porque api.login() é síncrono e bloqueante
 @app.post("/login")
-async def login(req: LoginRequest):
+def login(req: LoginRequest):
     """Autentica com Garmin Connect via SSO."""
     try:
         api = garminconnect.Garmin(req.email, req.password)
@@ -81,10 +97,13 @@ async def logout(request: Request):
 
 # ── Atividades ────────────────────────────────────────────────────
 @app.get("/activities")
-async def get_activities(limit: int = 20, api: garminconnect.Garmin = Depends(get_api)):
+def get_activities(limit: int = 20, api: garminconnect.Garmin = Depends(get_api)):
     """Últimas N atividades (corridas, ciclismo, caminhadas, etc.)."""
     try:
-        data = api.get_activities(0, limit)
+        # Usamos cache para as atividades também, com uma chave baseada no token e limite
+        cache_key = f"activities_{id(api)}_{limit}"
+        data = fetch_with_cache(cache_key, lambda: api.get_activities(0, limit))
+        
         # Normalizar campos relevantes
         result = []
         for a in data:
@@ -94,7 +113,7 @@ async def get_activities(limit: int = 20, api: garminconnect.Garmin = Depends(ge
                 "activityType": a.get("activityType", {}).get("typeKey", "unknown"),
                 "startTimeLocal": a.get("startTimeLocal", ""),
                 "distance": round((a.get("distance") or 0) / 1000, 2),       # m → km
-                "duration": round((a.get("duration") or 0) / 60, 1),          # s → min
+                "duration": round((a.get("duration") or 0) / 60, 1),           # s → min
                 "elapsedDuration": a.get("elapsedDuration", 0),
                 "averageHR": a.get("averageHR"),
                 "maxHR": a.get("maxHR"),
@@ -112,86 +131,104 @@ async def get_activities(limit: int = 20, api: garminconnect.Garmin = Depends(ge
 
 # ── Frequência Cardíaca ───────────────────────────────────────────
 @app.get("/heartrate")
-async def get_heartrate(
+def get_heartrate(
     date_str: str = None,
     api: garminconnect.Garmin = Depends(get_api)
 ):
     """FC detalhada para um dia específico (YYYY-MM-DD)."""
     d = date_str or date.today().strftime("%Y-%m-%d")
+    cache_key = f"hr_{id(api)}_{d}"
     try:
-        return api.get_heart_rates(d)
+        return fetch_with_cache(cache_key, lambda: api.get_heart_rates(d))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/heartrate/weekly")
-async def get_heartrate_weekly(
+def get_heartrate_weekly(
     days: int = 7,
     api: garminconnect.Garmin = Depends(get_api)
 ):
     """FC de repouso dos últimos N dias."""
-    results = []
-    today = date.today()
-    for i in range(days - 1, -1, -1):
-        d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
-        try:
-            data = api.get_heart_rates(d)
-            results.append({
-                "date": d,
-                "restingHR": data.get("restingHeartRate"),
-                "maxHR": data.get("maxHeartRate"),
-                "minHR": data.get("minHeartRate"),
-            })
-        except Exception:
-            results.append({"date": d, "restingHR": None, "maxHR": None})
-    return results
+    cache_key = f"hr_weekly_{id(api)}_{days}_{date.today()}"
+    
+    def fetch_weekly_hr():
+        results = []
+        today = date.today()
+        for i in range(days - 1, -1, -1):
+            d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+            try:
+                data = api.get_heart_rates(d)
+                results.append({
+                    "date": d,
+                    "restingHR": data.get("restingHeartRate"),
+                    "maxHR": data.get("maxHeartRate"),
+                    "minHR": data.get("minHeartRate"),
+                })
+            except Exception:
+                results.append({"date": d, "restingHR": None, "maxHR": None})
+        return results
+
+    try:
+        return fetch_with_cache(cache_key, fetch_weekly_hr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Sono ──────────────────────────────────────────────────────────
 @app.get("/sleep")
-async def get_sleep(
+def get_sleep(
     date_str: str = None,
     api: garminconnect.Garmin = Depends(get_api)
 ):
     """Dados de sono para um dia específico."""
     d = date_str or date.today().strftime("%Y-%m-%d")
+    cache_key = f"sleep_{id(api)}_{d}"
     try:
-        return api.get_sleep_data(d)
+        return fetch_with_cache(cache_key, lambda: api.get_sleep_data(d))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/sleep/weekly")
-async def get_sleep_weekly(
+def get_sleep_weekly(
     days: int = 7,
     api: garminconnect.Garmin = Depends(get_api)
 ):
     """Resumo de sono para os últimos N dias."""
-    results = []
-    today = date.today()
-    for i in range(days - 1, -1, -1):
-        d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
-        try:
-            raw = api.get_sleep_data(d)
-            summary = raw.get("dailySleepDTO", {})
-            results.append({
-                "date": d,
-                "sleepScore": summary.get("sleepScores", {}).get("overall", {}).get("value"),
-                "deepSleepSeconds": summary.get("deepSleepSeconds"),
-                "lightSleepSeconds": summary.get("lightSleepSeconds"),
-                "remSleepSeconds": summary.get("remSleepSeconds"),
-                "awakeSleepSeconds": summary.get("awakeSleepSeconds"),
-                "sleepStartTimestampLocal": summary.get("sleepStartTimestampLocal"),
-                "sleepEndTimestampLocal": summary.get("sleepEndTimestampLocal"),
-            })
-        except Exception:
-            results.append({"date": d})
-    return results
+    cache_key = f"sleep_weekly_{id(api)}_{days}_{date.today()}"
+    
+    def fetch_weekly_sleep():
+        results = []
+        today = date.today()
+        for i in range(days - 1, -1, -1):
+            d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+            try:
+                raw = api.get_sleep_data(d)
+                summary = raw.get("dailySleepDTO", {})
+                results.append({
+                    "date": d,
+                    "sleepScore": summary.get("sleepScores", {}).get("overall", {}).get("value"),
+                    "deepSleepSeconds": summary.get("deepSleepSeconds"),
+                    "lightSleepSeconds": summary.get("lightSleepSeconds"),
+                    "remSleepSeconds": summary.get("remSleepSeconds"),
+                    "awakeSleepSeconds": summary.get("awakeSleepSeconds"),
+                    "sleepStartTimestampLocal": summary.get("sleepStartTimestampLocal"),
+                    "sleepEndTimestampLocal": summary.get("sleepEndTimestampLocal"),
+                })
+            except Exception:
+                results.append({"date": d})
+        return results
+
+    try:
+        return fetch_with_cache(cache_key, fetch_weekly_sleep)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Passos & Calorias ─────────────────────────────────────────────
 @app.get("/steps")
-async def get_steps(
+def get_steps(
     days: int = 7,
     api: garminconnect.Garmin = Depends(get_api)
 ):
@@ -199,28 +236,30 @@ async def get_steps(
     today = date.today()
     start = (today - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     end = today.strftime("%Y-%m-%d")
+    cache_key = f"steps_{id(api)}_{start}_{end}"
     try:
-        return api.get_daily_steps(start, end)
+        return fetch_with_cache(cache_key, lambda: api.get_daily_steps(start, end))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/stats")
-async def get_stats(
+def get_stats(
     date_str: str = None,
     api: garminconnect.Garmin = Depends(get_api)
 ):
     """Estatísticas diárias (calorias, passos, distância, stress, etc.)."""
     d = date_str or date.today().strftime("%Y-%m-%d")
+    cache_key = f"stats_{id(api)}_{d}"
     try:
-        return api.get_stats(d)
+        return fetch_with_cache(cache_key, lambda: api.get_stats(d))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Body Battery & Stress ─────────────────────────────────────────
 @app.get("/body-battery")
-async def get_body_battery(
+def get_body_battery(
     days: int = 7,
     api: garminconnect.Garmin = Depends(get_api)
 ):
@@ -228,21 +267,23 @@ async def get_body_battery(
     today = date.today()
     start = (today - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     end = today.strftime("%Y-%m-%d")
+    cache_key = f"bb_{id(api)}_{start}_{end}"
     try:
-        return api.get_body_battery(start, end)
+        return fetch_with_cache(cache_key, lambda: api.get_body_battery(start, end))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/stress")
-async def get_stress(
+def get_stress(
     date_str: str = None,
     api: garminconnect.Garmin = Depends(get_api)
 ):
     """Dados de stress para um dia específico."""
     d = date_str or date.today().strftime("%Y-%m-%d")
+    cache_key = f"stress_{id(api)}_{d}"
     try:
-        return api.get_stress_data(d)
+        return fetch_with_cache(cache_key, lambda: api.get_stress_data(d))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -250,4 +291,4 @@ async def get_stress(
 # ── Health check ──────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0"}
+    return {"status": "ok", "version": "1.0.1"}
