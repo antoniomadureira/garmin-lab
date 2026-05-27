@@ -11,14 +11,10 @@ try:
     api = garminconnect.Garmin(email, password)
     api.login()
     
-    # Cria uma pasta temporária para guardar a sessão
     token_dir = "temp_tokens"
     os.makedirs(token_dir, exist_ok=True)
-    
-    # CORREÇÃO: O método correto é apenas .dump()
     api.garth.dump(token_dir)
     
-    # Lê os ficheiros e converte tudo numa única string codificada
     tokens_data = {}
     for file in os.listdir(token_dir):
         if file.endswith(".json"):
@@ -28,11 +24,12 @@ try:
     tokens_json = json.dumps(tokens_data)
     tokens_b64 = base64.b64encode(tokens_json.encode()).decode('utf-8')
     
-    print("\n" + "="*60)
-    print("COPIA ESTA STRING (Abaixo dos = e até ao final):")
-    print("="*60)
-    print(tokens_b64)
-    print("="*60 + "\n")
+    # NOVIDADE: Guarda direto num ficheiro para não haver erros de cópia
+    with open("meu_token.txt", "w") as f:
+        f.write(tokens_b64)
+        
+    print("\nSUCESSO! O teu passe foi guardado no ficheiro 'meu_token.txt'.")
+    print("Abre esse ficheiro no VS Code, faz Ctrl+A (selecionar tudo), copia e cola no Render.")
     
 except Exception as e:
     print(f"Erro ao ligar: {e}")

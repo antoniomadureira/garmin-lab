@@ -73,6 +73,14 @@ def login(req: LoginRequest):
         
         # Se existir a variável de ambiente, recria a pasta de sessão para o Garth ler
         if env_token:
+            # Limpar espaços ou quebras de linha invisíveis
+            env_token = env_token.strip()
+            
+            # Garantir que o tamanho é múltiplo de 4 (adiciona o símbolo '=' se faltar)
+            padding = len(env_token) % 4
+            if padding > 0:
+                env_token += "=" * (4 - padding)
+
             os.makedirs(token_store, exist_ok=True)
             tokens_data = json.loads(base64.b64decode(env_token).decode('utf-8'))
             for filename, content in tokens_data.items():
