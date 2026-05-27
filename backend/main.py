@@ -1,7 +1,6 @@
 """
 Garmin Dashboard – Backend API
 Usa: garminconnect + FastAPI
-Inicia com: uvicorn main:app --reload --port 8000
 """
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,18 +8,22 @@ from pydantic import BaseModel
 from datetime import date, timedelta
 import secrets
 import time
+import os
+import json
+import base64
 
 import garminconnect
 
-app = FastAPI(title="Garmin Dashboard API", version="1.0.1")
+app = FastAPI(title="Garmin Dashboard API", version="1.0.2")
 
+# ── Configuração de CORS para permitir a ligação do Vercel ────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
-        "https://garmin-lab.vercel.app",
+        "https://garmin-lab.vercel.app",  # Permite pedidos da versão online!
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -60,13 +63,31 @@ def get_api(request: Request) -> garminconnect.Garmin:
 
 
 # ── Auth endpoints ────────────────────────────────────────────────
-# Nota: Removido o 'async' porque api.login() é síncrono e bloqueante
 @app.post("/login")
 def login(req: LoginRequest):
-    """Autentica com Garmin Connect via SSO."""
+    """Autentica usando os Tokens de Sessão do Render para evitar bloqueios."""
     try:
+        # 1. Preparar a pasta temporária para os tokens
+        token_store = "/tmp/garmin_tokens"
+        env_token = os.getenv("GARMIN_SESSION_TOKEN")
+        
+        # Se existir a variável de ambiente, recria a pasta de sessão para o Garth ler
+        if env_token:
+            os.makedirs(token_store, exist_ok=True)
+            tokens_data = json.loads(base64.b64decode(env_token).decode('utf-8'))
+            for filename, content in tokens_data.items():
+                with open(os.path.join(token_store, filename), "w") as f:
+                    f.write(content)
+                    
+        # 2. Inicializar a API
         api = garminconnect.Garmin(req.email, req.password)
-        api.login()
+        
+        # 3. Tentar o login com a sessão guardada (Isto salta a porta bloqueada!)
+        if env_token and os.path.exists(token_store):
+            api.login(token_store)
+        else:
+            api.login() # Fallback caso estejas a correr no teu computador local sem a variável de ambiente
+            
         token = secrets.token_urlsafe(32)
         sessions[token] = api
 
@@ -81,8 +102,6 @@ def login(req: LoginRequest):
 
     except garminconnect.GarminConnectAuthenticationError:
         raise HTTPException(status_code=401, detail="Credenciais inválidas.")
-    except garminconnect.GarminConnectTooManyRequestsError:
-        raise HTTPException(status_code=429, detail="Demasiadas tentativas. Aguarda uns minutos.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -100,11 +119,9 @@ async def logout(request: Request):
 def get_activities(limit: int = 20, api: garminconnect.Garmin = Depends(get_api)):
     """Últimas N atividades (corridas, ciclismo, caminhadas, etc.)."""
     try:
-        # Usamos cache para as atividades também, com uma chave baseada no token e limite
         cache_key = f"activities_{id(api)}_{limit}"
         data = fetch_with_cache(cache_key, lambda: api.get_activities(0, limit))
         
-        # Normalizar campos relevantes
         result = []
         for a in data:
             result.append({
@@ -135,7 +152,6 @@ def get_heartrate(
     date_str: str = None,
     api: garminconnect.Garmin = Depends(get_api)
 ):
-    """FC detalhada para um dia específico (YYYY-MM-DD)."""
     d = date_str or date.today().strftime("%Y-%m-%d")
     cache_key = f"hr_{id(api)}_{d}"
     try:
@@ -149,7 +165,6 @@ def get_heartrate_weekly(
     days: int = 7,
     api: garminconnect.Garmin = Depends(get_api)
 ):
-    """FC de repouso dos últimos N dias."""
     cache_key = f"hr_weekly_{id(api)}_{days}_{date.today()}"
     
     def fetch_weekly_hr():
@@ -181,7 +196,6 @@ def get_sleep(
     date_str: str = None,
     api: garminconnect.Garmin = Depends(get_api)
 ):
-    """Dados de sono para um dia específico."""
     d = date_str or date.today().strftime("%Y-%m-%d")
     cache_key = f"sleep_{id(api)}_{d}"
     try:
@@ -195,7 +209,6 @@ def get_sleep_weekly(
     days: int = 7,
     api: garminconnect.Garmin = Depends(get_api)
 ):
-    """Resumo de sono para os últimos N dias."""
     cache_key = f"sleep_weekly_{id(api)}_{days}_{date.today()}"
     
     def fetch_weekly_sleep():
@@ -232,7 +245,6 @@ def get_steps(
     days: int = 7,
     api: garminconnect.Garmin = Depends(get_api)
 ):
-    """Passos diários nos últimos N dias."""
     today = date.today()
     start = (today - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     end = today.strftime("%Y-%m-%d")
@@ -248,7 +260,6 @@ def get_stats(
     date_str: str = None,
     api: garminconnect.Garmin = Depends(get_api)
 ):
-    """Estatísticas diárias (calorias, passos, distância, stress, etc.)."""
     d = date_str or date.today().strftime("%Y-%m-%d")
     cache_key = f"stats_{id(api)}_{d}"
     try:
@@ -263,7 +274,6 @@ def get_body_battery(
     days: int = 7,
     api: garminconnect.Garmin = Depends(get_api)
 ):
-    """Body Battery dos últimos N dias."""
     today = date.today()
     start = (today - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     end = today.strftime("%Y-%m-%d")
@@ -279,7 +289,6 @@ def get_stress(
     date_str: str = None,
     api: garminconnect.Garmin = Depends(get_api)
 ):
-    """Dados de stress para um dia específico."""
     d = date_str or date.today().strftime("%Y-%m-%d")
     cache_key = f"stress_{id(api)}_{d}"
     try:
@@ -291,4 +300,4 @@ def get_stress(
 # ── Health check ──────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.1"}
+    return {"status": "ok", "version": "1.0.2"}
