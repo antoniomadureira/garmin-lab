@@ -1,4 +1,4 @@
-const BASE = "https://garmin-lab.onrender.com/";
+const BASE = "https://garmin-lab.onrender.com";
 
 let _token = localStorage.getItem("garmin_token") || null;
 
