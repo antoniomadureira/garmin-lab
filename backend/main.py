@@ -1,6 +1,6 @@
 """
 Garmin Dashboard – Backend API
-Usa: garminconnect + FastAPI
+Usa: garminconnect + FastAPI + Gemini AI
 """
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,10 +11,12 @@ import time
 import os
 import json
 import base64
+import re
 
 import garminconnect
+from google import genai
 
-app = FastAPI(title="Garmin Dashboard API", version="1.0.2")
+app = FastAPI(title="Garmin Dashboard API", version="1.0.3")
 
 # ── Configuração de CORS para permitir a ligação do Vercel ────────
 app.add_middleware(
@@ -73,10 +75,10 @@ def login(req: LoginRequest):
         
         # Se existir a variável de ambiente, recria a pasta de sessão para o Garth ler
         if env_token:
-            # Limpar espaços ou quebras de linha invisíveis
-            env_token = env_token.strip()
+            # 1. A Bomba Nuclear: Remove absolutamente TUDO o que não seja texto Base64 puro
+            env_token = re.sub(r'[^a-zA-Z0-9+/=]', '', env_token)
             
-            # Garantir que o tamanho é múltiplo de 4 (adiciona o símbolo '=' se faltar)
+            # 2. Garantir que o tamanho é múltiplo de 4 (adiciona o símbolo '=' se faltar)
             padding = len(env_token) % 4
             if padding > 0:
                 env_token += "=" * (4 - padding)
@@ -120,6 +122,63 @@ async def logout(request: Request):
     token = auth.replace("Bearer ", "").strip()
     sessions.pop(token, None)
     return {"ok": True}
+
+
+# ── IA Briefing ───────────────────────────────────────────────────
+@app.get("/briefing")
+def get_ai_briefing(api: garminconnect.Garmin = Depends(get_api)):
+    """Gera um resumo inteligente do dia usando IA baseada em dados reais."""
+    try:
+        today = date.today().strftime("%Y-%m-%d")
+        
+        # 1. Camada Determinística (Os números reais)
+        sleep_data = api.get_sleep_data(today)
+        stats = api.get_stats(today)
+        body_battery = api.get_body_battery(today, today)
+        
+        # Extração segura dos valores
+        sleep_score = sleep_data.get("dailySleepDTO", {}).get("sleepScores", {}).get("overall", {}).get("value", "Desconhecido") if sleep_data else "Desconhecido"
+        stress = stats.get("averageStressLevel", "Desconhecido") if stats else "Desconhecido"
+        
+        bb_highest = "Desconhecido"
+        if body_battery and len(body_battery) > 0:
+            bb_highest = body_battery[0].get("bodyBatteryHighestValue", "Desconhecido")
+
+        # 2. Construção do Contexto para a IA
+        contexto_dados = f"""
+        Métricas de Hoje ({today}):
+        - Sleep Score: {sleep_score}/100
+        - Nível de Stress Médio: {stress}/100
+        - Body Battery Máximo ao acordar: {bb_highest}/100
+        """
+
+        prompt = f"""
+        Atua como um treinador de alto rendimento para um maratonista que corre cerca de 60km por semana.
+        Com base exclusivamente nos dados determinísticos abaixo, gera um briefing diário curto.
+        
+        {contexto_dados}
+        
+        O teu briefing tem de seguir exatamente esta estrutura:
+        1. Usa semáforos (🟢🟡🔴) para avaliar a Recuperação, a Carga recomendada e a Performance esperada.
+        2. Termina com uma 'Ação do Dia' (ex: fazer treino de séries, corrida de recuperação, ou descanso absoluto).
+        3. Dirige-te a mim como Tomás. Sê direto, sem rodeios e não inventes métricas.
+        """
+
+        # 3. Camada de Interpretação (Chamada à IA)
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            return {"briefing": "Aviso: A chave GEMINI_API_KEY não está configurada no Render."}
+            
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+        
+        return {"briefing": response.text}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Atividades ────────────────────────────────────────────────────
@@ -308,4 +367,4 @@ def get_stress(
 # ── Health check ──────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.2"}
+    return {"status": "ok", "version": "1.0.3"}
