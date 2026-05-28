@@ -1,14 +1,15 @@
 import { useState } from "react";
-import { Activity, Heart, Moon, BarChart2, Watch, LogOut, RefreshCw } from "lucide-react";
+import { Activity, Heart, Moon, BarChart2, Brain, Watch, LogOut, RefreshCw } from "lucide-react";
 import ActivitiesPanel from "./ActivitiesPanel.jsx";
 import HeartRatePanel from "./HeartRatePanel.jsx";
 import SleepPanel from "./SleepPanel.jsx";
 import StepsPanel from "./StepsPanel.jsx";
+import AICoach from "../AICoach.jsx"; // Verifica se o caminho está correto
 
 const C = {
   bg0: "#05090F", bg1: "#0B1221", border: "#1C2D47",
   accent: "#00BFFF", run: "#FF6230", heart: "#FF3A5C",
-  sleep: "#8B7FFF", steps: "#00D47E", muted: "#5C738F", text: "#DDE6F5",
+  sleep: "#8B7FFF", steps: "#00D47E", ai: "#1f6feb", muted: "#5C738F", text: "#DDE6F5",
 };
 
 const TABS = [
@@ -16,24 +17,23 @@ const TABS = [
   { id: "heartrate",  label: "Frequência Cardíaca", icon: Heart, color: C.heart },
   { id: "sleep",      label: "Sono", icon: Moon, color: C.sleep },
   { id: "steps",      label: "Passos & Calorias", icon: BarChart2, color: C.steps },
+  { id: "coach",      label: "Treinador IA", icon: Brain, color: C.ai },
 ];
 
 export default function Dashboard({ displayName, onLogout }) {
   const [tab, setTab] = useState("activities");
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const activeTab = TABS.find(t => t.id === tab);
-
   const panels = {
     activities: <ActivitiesPanel key={`act-${refreshKey}`} />,
     heartrate:  <HeartRatePanel  key={`hr-${refreshKey}`} />,
     sleep:      <SleepPanel      key={`sl-${refreshKey}`} />,
     steps:      <StepsPanel      key={`st-${refreshKey}`} />,
+    coach:      <AICoach         key={`co-${refreshKey}`} />
   };
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg0, display: "flex", flexDirection: "column" }}>
-      {/* ── Top bar ── */}
       <header style={{
         background: C.bg1, borderBottom: `1px solid ${C.border}`,
         padding: "14px 28px", display: "flex", alignItems: "center", gap: 14,
@@ -47,7 +47,7 @@ export default function Dashboard({ displayName, onLogout }) {
           <Watch size={20} color={C.bg0} />
         </div>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 16, letterSpacing: "-0.01em" }}>Garmin Dashboard</div>
+          <div style={{ fontWeight: 700, fontSize: 16, letterSpacing: "-0.01em", color: C.text }}>Garmin Dashboard</div>
           {displayName && <div style={{ color: C.muted, fontSize: 12 }}>{displayName}</div>}
         </div>
 
@@ -55,7 +55,7 @@ export default function Dashboard({ displayName, onLogout }) {
           <button
             onClick={() => setRefreshKey(k => k + 1)}
             title="Atualizar dados"
-            style={{ color: C.muted, padding: 8, borderRadius: 8, transition: "color 0.2s" }}
+            style={{ color: C.muted, padding: 8, borderRadius: 8, transition: "color 0.2s", background: 'transparent', border: 'none', cursor: 'pointer' }}
             onMouseEnter={e => e.currentTarget.style.color = C.accent}
             onMouseLeave={e => e.currentTarget.style.color = C.muted}
           >
@@ -64,7 +64,7 @@ export default function Dashboard({ displayName, onLogout }) {
           <button
             onClick={onLogout}
             title="Sair"
-            style={{ color: C.muted, padding: 8, borderRadius: 8, transition: "color 0.2s" }}
+            style={{ color: C.muted, padding: 8, borderRadius: 8, transition: "color 0.2s", background: 'transparent', border: 'none', cursor: 'pointer' }}
             onMouseEnter={e => e.currentTarget.style.color = C.heart}
             onMouseLeave={e => e.currentTarget.style.color = C.muted}
           >
@@ -73,7 +73,6 @@ export default function Dashboard({ displayName, onLogout }) {
         </div>
       </header>
 
-      {/* ── Tab bar ── */}
       <nav style={{
         background: C.bg1, borderBottom: `1px solid ${C.border}`,
         padding: "0 28px", display: "flex", gap: 2,
@@ -87,9 +86,11 @@ export default function Dashboard({ displayName, onLogout }) {
               key={t.id}
               onClick={() => setTab(t.id)}
               style={{
+                background: 'transparent', cursor: 'pointer',
                 padding: "13px 20px", display: "flex", alignItems: "center", gap: 8,
                 color: active ? t.color : C.muted,
                 borderBottom: active ? `2px solid ${t.color}` : "2px solid transparent",
+                borderTop: 'none', borderLeft: 'none', borderRight: 'none',
                 fontSize: 14, fontWeight: active ? 600 : 400,
                 transition: "all 0.2s", whiteSpace: "nowrap",
               }}
@@ -103,7 +104,6 @@ export default function Dashboard({ displayName, onLogout }) {
         })}
       </nav>
 
-      {/* ── Content ── */}
       <main style={{ flex: 1, padding: "28px", maxWidth: 1140, width: "100%", margin: "0 auto", alignSelf: "stretch" }}>
         {panels[tab]}
       </main>

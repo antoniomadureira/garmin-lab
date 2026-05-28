@@ -1,147 +1,180 @@
-import { useState, useEffect } from "react";
-import { Activity, Flame, Timer, TrendingUp } from "lucide-react";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Cell } from "recharts";
-import { fetchActivities } from "../api.js";
-import { C, StatCard, Card, Tooltip, Spinner, ErrorBanner, toMinSec, actTypeLabel, actEmoji, actColor } from "./ui.jsx";
-
-const paceFromSpeed = (mps) => {
-  if (!mps || mps <= 0) return null;
-  const minkm = 1000 / mps / 60;
-  const m = Math.floor(minkm);
-  const s = Math.round((minkm - m) * 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-};
+import { useState, useEffect } from 'react';
+import { Activity, Flame, Clock } from 'lucide-react';
 
 export default function ActivitiesPanel() {
-  const [data, setData] = useState([]);
+  const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [activeMetric, setActiveMetric] = useState('distance'); // 'distance', 'calories', 'duration'
+
+  const token = localStorage.getItem("garmin_token");
+  const baseUrl = "https://garmin-lab.onrender.com";
 
   useEffect(() => {
-    fetchActivities(25)
-      .then(setData)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
+    const fetchYTD = async () => {
+      try {
+        const res = await fetch(`${baseUrl}/activities/ytd`, {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        
+        // Proteção 1: Força o erro se o servidor falhar (ex: 404 ou 500)
+        if (!res.ok) throw new Error("Erro na resposta do servidor");
+        
+        const data = await res.json();
+        
+        // Proteção 2: Garante que os dados são uma lista (array) antes de guardar no estado
+        setActivities(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error("Erro a carregar YTD:", error);
+        // Em caso de falha grave de rede, define um array vazio para não quebrar o React
+        setActivities([]); 
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchYTD();
+  }, [baseUrl, token]);
 
-  if (loading) return <Spinner />;
-  if (error) return <ErrorBanner msg={error} />;
+  // Cálculos do Ano (YTD)
+  const runs = activities.filter(a => a.activityType.includes('running'));
+  const totalDistance = runs.reduce((acc, curr) => acc + (curr.distance || 0), 0).toFixed(1);
+  const totalCalories = activities.reduce((acc, curr) => acc + (curr.calories || 0), 0);
+  const totalActivities = activities.length;
 
-  const runs = data.filter(a => ["running", "trail_running"].includes(a.activityType));
-  const totalDistRun = runs.reduce((s, a) => s + (a.distance || 0), 0);
-  const totalCal = data.reduce((s, a) => s + (a.calories || 0), 0);
+  // Lógica para a Semana Atual (Segunda a Domingo)
+  const getWeeklyData = () => {
+    const today = new Date();
+    const dayOfWeek = today.getDay() || 7; // Ajusta para que Domingo seja 7 em vez de 0
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - dayOfWeek + 1);
+    monday.setHours(0, 0, 0, 0);
 
-  // Weekly distance chart
-  const weekChart = data.slice(0, 7).reverse().map(a => ({
-    name: new Date(a.startTimeLocal).toLocaleDateString("pt-PT", { weekday: "short" }),
-    km: a.distance || 0,
-    type: a.activityType,
-  }));
+    const weekDays = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
+    let chartData = weekDays.map(day => ({ day, distance: 0, calories: 0, duration: 0 }));
+
+    activities.forEach(act => {
+      if (!act.startTimeLocal) return;
+      const actDate = new Date(act.startTimeLocal);
+      
+      // Se a atividade aconteceu a partir de segunda-feira desta semana
+      if (actDate >= monday) {
+        const actDayIndex = (actDate.getDay() || 7) - 1; // 0 = Segunda, 6 = Domingo
+        if (actDayIndex >= 0 && actDayIndex < 7) {
+          chartData[actDayIndex].distance += act.distance || 0;
+          chartData[actDayIndex].calories += act.calories || 0;
+          chartData[actDayIndex].duration += act.duration || 0;
+        }
+      }
+    });
+    return chartData;
+  };
+
+  const weeklyData = getWeeklyData();
+  const maxMetricValue = Math.max(...weeklyData.map(d => d[activeMetric])) || 1; // Evita divisão por zero
+
+  if (loading) return <div style={{ color: '#5C738F' }}>A sincronizar histórico anual e a desenhar gráficos...</div>;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* Stats row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
-        <StatCard icon={<TrendingUp size={15} />} label="Distância (corridas)" value={totalDistRun.toFixed(1)} unit="km" color={C.run} sub={`${runs.length} corridas`} />
-        <StatCard icon={<Flame size={15} />} label="Calorias totais" value={totalCal.toLocaleString("pt-PT")} unit="kcal" color={C.battery} sub={`${data.length} atividades`} />
-        <StatCard icon={<Activity size={15} />} label="Atividades recentes" value={data.length} unit="sessões" color={C.accent} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      
+      {/* Top Cards (YTD) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+        <div style={{ background: '#0B1221', padding: '24px', borderRadius: '12px', border: '1px solid #1C2D47' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#5C738F', marginBottom: '12px' }}>
+            <Activity size={18} color="#FF6230" />
+            <span style={{ fontSize: '13px', fontWeight: 600, letterSpacing: '1px' }}>DISTÂNCIA (CORRIDAS YTD)</span>
+          </div>
+          <div style={{ fontSize: '32px', fontWeight: 800, color: '#FF6230' }}>
+            {totalDistance} <span style={{ fontSize: '16px', color: '#5C738F', fontWeight: 500 }}>km</span>
+          </div>
+          <div style={{ color: '#5C738F', fontSize: '13px', marginTop: '8px' }}>{runs.length} corridas este ano</div>
+        </div>
+
+        <div style={{ background: '#0B1221', padding: '24px', borderRadius: '12px', border: '1px solid #1C2D47' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#5C738F', marginBottom: '12px' }}>
+            <Flame size={18} color="#FBBF24" />
+            <span style={{ fontSize: '13px', fontWeight: 600, letterSpacing: '1px' }}>CALORIAS TOTAIS (YTD)</span>
+          </div>
+          <div style={{ fontSize: '32px', fontWeight: 800, color: '#FBBF24' }}>
+            {totalCalories.toLocaleString()} <span style={{ fontSize: '16px', color: '#5C738F', fontWeight: 500 }}>kcal</span>
+          </div>
+          <div style={{ color: '#5C738F', fontSize: '13px', marginTop: '8px' }}>{totalActivities} atividades registadas</div>
+        </div>
       </div>
 
-      {/* Distance chart */}
-      {weekChart.length > 0 && (
-        <Card title="Distância — Últimas atividades">
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={weekChart} barSize={28}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
-              <XAxis dataKey="name" stroke={C.muted} tick={{ fontSize: 11, fill: C.muted }} />
-              <YAxis stroke={C.muted} tick={{ fontSize: 11, fill: C.muted }} unit=" km" />
-              <RTooltip content={<Tooltip formatter={(v) => `${v.toFixed(2)} km`} />} />
-              <Bar dataKey="km" radius={[6, 6, 0, 0]} name="Distância">
-                {weekChart.map((entry, i) => (
-                  <Cell key={i} fill={actColor(entry.type, C)} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
-      )}
-
-      {/* Activity list */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {data.map(a => {
-          const color = actColor(a.activityType, C);
-          const pace = paceFromSpeed(a.averageSpeed);
-          const dateStr = a.startTimeLocal
-            ? new Date(a.startTimeLocal).toLocaleDateString("pt-PT", { day: "numeric", month: "short" })
-            : "—";
-
-          return (
-            <div key={a.activityId} style={{
-              background: C.bg2, border: `1px solid ${C.border}`,
-              borderRadius: 14, padding: "15px 20px",
-              display: "flex", alignItems: "center", gap: 16,
-              transition: "border-color 0.2s",
-            }}
-              onMouseEnter={e => e.currentTarget.style.borderColor = color}
-              onMouseLeave={e => e.currentTarget.style.borderColor = C.border}
+      {/* Gráfico Interativo da Semana */}
+      <div style={{ background: '#0B1221', padding: '24px', borderRadius: '12px', border: '1px solid #1C2D47' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+          <span style={{ fontSize: '14px', fontWeight: 600, letterSpacing: '1px', color: '#5C738F' }}>
+            RESUMO DA SEMANA ATUAL
+          </span>
+          
+          {/* Botões de Seleção de Métrica */}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button 
+              onClick={() => setActiveMetric('distance')}
+              style={{ 
+                background: activeMetric === 'distance' ? '#FF6230' : 'transparent', 
+                color: activeMetric === 'distance' ? '#000' : '#5C738F', 
+                border: `1px solid ${activeMetric === 'distance' ? '#FF6230' : '#1C2D47'}`, 
+                padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
+                transition: 'all 0.2s'
+              }}
             >
-              {/* Icon */}
-              <div style={{
-                width: 44, height: 44, borderRadius: 12,
-                background: `${color}20`, display: "flex",
-                alignItems: "center", justifyContent: "center",
-                fontSize: 20, flexShrink: 0,
-              }}>
-                {actEmoji(a.activityType)}
-              </div>
+              Distância
+            </button>
+            <button 
+              onClick={() => setActiveMetric('calories')}
+              style={{ 
+                background: activeMetric === 'calories' ? '#FBBF24' : 'transparent', 
+                color: activeMetric === 'calories' ? '#000' : '#5C738F', 
+                border: `1px solid ${activeMetric === 'calories' ? '#FBBF24' : '#1C2D47'}`, 
+                padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
+                transition: 'all 0.2s'
+              }}
+            >
+              Calorias
+            </button>
+            <button 
+              onClick={() => setActiveMetric('duration')}
+              style={{ 
+                background: activeMetric === 'duration' ? '#00BFFF' : 'transparent', 
+                color: activeMetric === 'duration' ? '#000' : '#5C738F', 
+                border: `1px solid ${activeMetric === 'duration' ? '#00BFFF' : '#1C2D47'}`, 
+                padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
+                transition: 'all 0.2s'
+              }}
+            >
+              Tempo
+            </button>
+          </div>
+        </div>
 
-              {/* Name + type */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {a.activityName || actTypeLabel(a.activityType)}
-                </div>
-                <div style={{ color: C.muted, fontSize: 12 }}>
-                  {dateStr} · {actTypeLabel(a.activityType)}
-                </div>
+        {/* Desenho do Gráfico */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '200px', borderBottom: '1px solid #1C2D47', paddingBottom: '10px' }}>
+          {weeklyData.map((data, idx) => {
+            const heightPercentage = (data[activeMetric] / maxMetricValue) * 100;
+            const barColor = activeMetric === 'distance' ? '#FF6230' : activeMetric === 'calories' ? '#FBBF24' : '#00BFFF';
+            
+            return (
+              <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, gap: '8px' }}>
+                <span style={{ fontSize: '12px', color: '#DDE6F5', fontWeight: 500 }}>
+                  {data[activeMetric] > 0 ? (activeMetric === 'distance' ? `${data[activeMetric].toFixed(1)}` : Math.round(data[activeMetric])) : ''}
+                </span>
+                <div style={{ 
+                  width: '32px', 
+                  height: `${heightPercentage}%`, 
+                  background: barColor, 
+                  borderRadius: '4px 4px 0 0',
+                  minHeight: data[activeMetric] > 0 ? '4px' : '0',
+                  transition: 'height 0.4s ease-out, background 0.2s'
+                }}></div>
+                <span style={{ fontSize: '11px', color: '#5C738F', marginTop: '4px' }}>{data.day.substring(0, 3)}</span>
               </div>
-
-              {/* Metrics */}
-              <div style={{ display: "flex", gap: 20, flexShrink: 0, alignItems: "center" }}>
-                {a.distance > 0 && (
-                  <div style={{ textAlign: "center" }}>
-                    <div className="stat-num" style={{ fontSize: 18, color }}>{a.distance.toFixed(2)}</div>
-                    <div style={{ color: C.muted, fontSize: 11 }}>km</div>
-                  </div>
-                )}
-                {pace && (
-                  <div style={{ textAlign: "center" }}>
-                    <div className="stat-num" style={{ fontSize: 18, color: C.text }}>{pace}</div>
-                    <div style={{ color: C.muted, fontSize: 11 }}>min/km</div>
-                  </div>
-                )}
-                {a.averageHR && (
-                  <div style={{ textAlign: "center" }}>
-                    <div className="stat-num" style={{ fontSize: 18, color: C.heart }}>{a.averageHR}</div>
-                    <div style={{ color: C.muted, fontSize: 11 }}>bpm avg</div>
-                  </div>
-                )}
-                {a.calories > 0 && (
-                  <div style={{ textAlign: "center" }}>
-                    <div className="stat-num" style={{ fontSize: 18, color: C.battery }}>{Math.round(a.calories)}</div>
-                    <div style={{ color: C.muted, fontSize: 11 }}>kcal</div>
-                  </div>
-                )}
-                {a.duration > 0 && (
-                  <div style={{ textAlign: "center" }}>
-                    <div className="stat-num" style={{ fontSize: 18, color: C.muted }}>{Math.round(a.duration)}</div>
-                    <div style={{ color: C.muted, fontSize: 11 }}>min</div>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
+      
     </div>
   );
 }
