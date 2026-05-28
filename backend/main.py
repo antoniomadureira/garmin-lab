@@ -16,9 +16,8 @@ import re
 import garminconnect
 from google import genai
 
-app = FastAPI(title="Garmin Dashboard API", version="1.0.5")
+app = FastAPI(title="Garmin Dashboard API", version="1.0.6")
 
-# ── Configuração de CORS ──────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -32,7 +31,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Sessões e Cache em memória ────────────────────────────────────
 sessions: dict[str, garminconnect.Garmin] = {}
 api_cache: dict[str, dict] = {}
 CACHE_TTL = 3600  
@@ -45,7 +43,6 @@ def fetch_with_cache(cache_key: str, fetch_func):
     api_cache[cache_key] = {"data": data, "expires": now + CACHE_TTL}
     return data
 
-# ── Modelos ───────────────────────────────────────────────────────
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -60,7 +57,6 @@ def get_api(request: Request) -> garminconnect.Garmin:
         raise HTTPException(status_code=401, detail="Não autenticado.")
     return sessions[token]
 
-# ── Endpoints de Autenticação ─────────────────────────────────────
 @app.post("/login")
 def login(req: LoginRequest):
     try:
@@ -115,45 +111,45 @@ async def logout(request: Request):
 def get_ai_briefing(api: garminconnect.Garmin = Depends(get_api)):
     try:
         today = date.today().strftime("%Y-%m-%d")
-        sleep_data = api.get_sleep_data(today) or {}
-        stats = api.get_stats(today) or {}
-        body_battery = api.get_body_battery(today, today) or []
         
+        try:
+            sleep_data = api.get_sleep_data(today) or {}
+            stats = api.get_stats(today) or {}
+            body_battery = api.get_body_battery(today, today) or []
+        except Exception as api_err:
+            return {"briefing": f"Erro a obter dados da Garmin. A tua sessão pode ter expirado. Detalhe: {str(api_err)}"}
+            
         sleep_score = sleep_data.get("dailySleepDTO", {}).get("sleepScores", {}).get("overall", {}).get("value", "N/A")
         stress = stats.get("averageStressLevel", "N/A")
         bb_highest = body_battery[0].get("bodyBatteryHighestValue", "N/A") if len(body_battery) > 0 else "N/A"
 
         prompt = f"""
-        Atua como fisiologista do desporto de elite. O atleta tem um volume de treino em torno de 60km/semana, complementado com treino de força (peso corporal).
+        Atua como fisiologista do desporto de elite. O atleta tem um volume de treino em torno de 60km/semana (preparação Maratona de Madrid), complementado estritamente com treino de força usando o peso corporal e percursos do Caminho de Santiago.
         
         Dados extraídos do dispositivo Garmin hoje ({today}):
         - Qualidade do Sono: {sleep_score}/100
         - Carga de Stress (SNC): {stress}/100
         - Body Battery (Pico Matinal): {bb_highest}/100
         
-        Escreve um briefing analítico estruturado exatamente nestes 3 pontos (sem utilizar emojis):
-        
+        Escreve um briefing analítico estruturado nestes 3 pontos (sem emojis):
         1. EVIDÊNCIA BIOMÉTRICA
-        (Lista os 3 valores exatos acima para ancorar a análise).
-        
         2. ESTADO DO SISTEMA NERVOSO E MUSCULAR
-        (Justifica de forma clínica como estes dados específicos indicam a recuperação do SNC e a prontidão muscular atual).
-        
         3. PRESCRIÇÃO FUNDAMENTADA
-        (Dita a recomendação de carga para hoje: corrida, calistenia/força ou recuperação, justificando a decisão diretamente com as métricas observadas).
         """
 
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            return {"briefing": "Aviso: Chave GEMINI_API_KEY em falta no servidor."}
+            return {"briefing": "🔴 Erro: Variável de ambiente GEMINI_API_KEY não encontrada no Render."}
             
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-        
-        return {"briefing": response.text}
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+            return {"briefing": response.text}
+        except Exception as gemini_err:
+            return {"briefing": f"🔴 Erro na comunicação com a Inteligência Artificial: {str(gemini_err)}"}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"briefing": f"Erro geral de servidor: {str(e)}"}
 
 @app.post("/chat")
 def ask_pt(req: ChatRequest, api: garminconnect.Garmin = Depends(get_api)):
@@ -163,25 +159,27 @@ def ask_pt(req: ChatRequest, api: garminconnect.Garmin = Depends(get_api)):
         stress = stats.get("averageStressLevel", "Desconhecido")
         
         prompt = f"""
-        Atua como treinador pessoal. O atleta treina para a Maratona de Madrid, fazendo cerca de 60km por semana e complemento de força com o próprio corpo.
-        O nível de stress médio dele registado pelo Garmin hoje está a {stress}/100.
+        Atua como treinador pessoal. O atleta treina para a Maratona de Madrid, faz reforço com peso corporal e está a gerir o desgaste do Caminho de Santiago.
+        O nível de stress médio dele hoje está a {stress}/100.
         
-        Responde de forma direta, técnica e estruturada em português de Portugal. Foca-te sempre no impacto fisiológico para a gestão de esforço de longa distância.
-        Pergunta: {req.message}
+        Responde à pergunta: {req.message}
         """
 
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            return {"reply": "Aviso: A chave GEMINI_API_KEY não está configurada."}
+            return {"reply": "🔴 Erro: GEMINI_API_KEY não configurada."}
 
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-        return {"reply": response.text}
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+            return {"reply": response.text}
+        except Exception as err:
+            return {"reply": f"🔴 Erro da IA: {str(err)}"}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"reply": f"Erro interno: {str(e)}"}
 
-# ── Atividades (Histórico Recente e YTD) ──────────────────────────
+# ── Atividades ────────────────────────────────────────────────────
 @app.get("/activities")
 def get_activities(limit: int = 20, api: garminconnect.Garmin = Depends(get_api)):
     try:
@@ -237,7 +235,6 @@ def get_activities_ytd(api: garminconnect.Garmin = Depends(get_api)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ── Restantes Endpoints (Frequência Cardíaca, Sono, etc) ──────────
 @app.get("/heartrate")
 def get_heartrate(date_str: str = None, api: garminconnect.Garmin = Depends(get_api)):
     d = date_str or date.today().strftime("%Y-%m-%d")
@@ -351,4 +348,4 @@ def get_stress(date_str: str = None, api: garminconnect.Garmin = Depends(get_api
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.5"}
+    return {"status": "ok", "version": "1.0.6"}
