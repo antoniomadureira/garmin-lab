@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 export default function AICoach() {
   const [briefing, setBriefing] = useState("");
@@ -7,9 +7,11 @@ export default function AICoach() {
   const [chatMessages, setChatMessages] = useState([]);
   const [currentInput, setCurrentInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  
+  const chatEndRef = useRef(null);
 
   const token = localStorage.getItem("garmin_token");
-  const baseUrl = "https://garmin-lab.onrender.com"; // Volta a colocar localhost:8000 se testares localmente
+  const baseUrl = "https://garmin-lab.onrender.com"; // O teu backend
 
   useEffect(() => {
     const fetchBriefing = async () => {
@@ -20,13 +22,18 @@ export default function AICoach() {
         const data = await response.json();
         setBriefing(data.briefing);
       } catch (error) {
-        setBriefing("🔴 Erro ao comunicar com o modelo analítico.");
+        setBriefing("Falha na comunicação com o motor analítico.");
       } finally {
         setLoadingBriefing(false);
       }
     };
     fetchBriefing();
   }, []);
+
+  // Auto-scroll do chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages, isTyping]);
 
   const handleSendMessage = async () => {
     if (!currentInput.trim()) return;
@@ -45,58 +52,107 @@ export default function AICoach() {
         },
         body: JSON.stringify({ message: userMsg })
       });
+      if (!response.ok) throw new Error("Erro no endpoint /chat");
+      
       const data = await response.json();
       setChatMessages(prev => [...prev, { role: 'pt', text: data.reply }]);
     } catch (error) {
-      setChatMessages(prev => [...prev, { role: 'pt', text: "Erro de ligação. Tenta novamente." }]);
+      setChatMessages(prev => [...prev, { role: 'pt', text: "Erro de ligação ao servidor. Verifica o deploy no Render." }]);
     } finally {
       setIsTyping(false);
     }
   };
 
+  // Ícones limpos em SVG (Estética Garmin)
+  const IconBriefing = () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8b949e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '10px' }}>
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+    </svg>
+  );
+
+  const IconBrain = () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8b949e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '10px' }}>
+      <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"></path>
+      <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"></path>
+    </svg>
+  );
+
   return (
-    <div style={{ display: 'flex', gap: '24px', color: '#c9d1d9', marginTop: '20px' }}>
+    <div style={{ display: 'flex', gap: '24px', color: '#c9d1d9', marginTop: '10px', height: '70vh' }}>
       
       {/* Coluna da Esquerda: Análise Diária */}
-      <div style={{ flex: 1, background: '#161b22', padding: '24px', borderRadius: '12px', border: '1px solid #30363d' }}>
-        <h2 style={{ color: '#fff', borderBottom: '1px solid #30363d', paddingBottom: '12px' }}>📊 Análise Fisiológica</h2>
+      <div style={{ flex: '1', background: '#0d1117', padding: '24px', borderRadius: '12px', border: '1px solid #30363d', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid #30363d', paddingBottom: '16px', marginBottom: '20px' }}>
+          <IconBriefing />
+          <h2 style={{ color: '#fff', fontSize: '18px', margin: 0, fontWeight: '500' }}>Análise Fisiológica</h2>
+        </div>
+        
         {loadingBriefing ? (
-          <p style={{ color: '#00c3ff' }}>A processar volumetria de dados...</p>
+          <p style={{ color: '#8b949e', fontSize: '14px' }}>A extrair e processar biometria...</p>
         ) : (
-          <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6', fontSize: '15px' }}>{briefing}</div>
+          <div style={{ whiteSpace: 'pre-wrap', lineHeight: '1.7', fontSize: '14px', color: '#c9d1d9' }}>
+            {briefing}
+          </div>
         )}
       </div>
 
       {/* Coluna da Direita: Chat PT Interativo */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#161b22', padding: '24px', borderRadius: '12px', border: '1px solid #00c3ff' }}>
-        <h2 style={{ color: '#fff', borderBottom: '1px solid #30363d', paddingBottom: '12px' }}>🧠 Pergunta ao Treinador</h2>
+      <div style={{ flex: '1.2', display: 'flex', flexDirection: 'column', background: '#0d1117', padding: '24px', borderRadius: '12px', border: '1px solid #30363d' }}>
+        <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid #30363d', paddingBottom: '16px', marginBottom: '20px' }}>
+          <IconBrain />
+          <h2 style={{ color: '#fff', fontSize: '18px', margin: 0, fontWeight: '500' }}>Laboratório de Treino</h2>
+        </div>
         
-        <div style={{ flex: 1, minHeight: '300px', maxHeight: '400px', overflowY: 'auto', marginBottom: '16px', paddingRight: '10px' }}>
-          {chatMessages.length === 0 && <p style={{ color: '#8b949e', fontStyle: 'italic' }}>Pergunta sobre o teu descanso, HRV ou plano de corrida...</p>}
+        <div style={{ flex: 1, overflowY: 'auto', marginBottom: '16px', paddingRight: '10px', display: 'flex', flexDirection: 'column' }}>
+          {chatMessages.length === 0 && (
+            <p style={{ color: '#8b949e', fontSize: '14px', textAlign: 'center', marginTop: 'auto', marginBottom: 'auto' }}>
+              Inicia uma sessão para debateres métricas ou ajustes de carga.
+            </p>
+          )}
           
           {chatMessages.map((msg, idx) => (
             <div key={idx} style={{ 
-              margin: '12px 0', textAlign: msg.role === 'user' ? 'right' : 'left',
-              background: msg.role === 'user' ? '#003d5b' : '#21262d',
-              padding: '12px', borderRadius: '8px', display: 'inline-block', maxWidth: '85%'
+              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+              background: msg.role === 'user' ? '#1f6feb' : '#21262d',
+              color: '#fff',
+              padding: '12px 16px', 
+              borderRadius: '8px', 
+              marginBottom: '12px',
+              maxWidth: '80%',
+              fontSize: '14px',
+              lineHeight: '1.5'
             }}>
-              <strong style={{ color: msg.role === 'user' ? '#00c3ff' : '#58a6ff' }}>{msg.role === 'user' ? 'Tu: ' : 'Treinador: '}</strong>
-              <div style={{ whiteSpace: 'pre-wrap', marginTop: '4px' }}>{msg.text}</div>
+              {msg.text}
             </div>
           ))}
-          {isTyping && <div style={{ color: '#00c3ff', fontSize: '12px' }}>O treinador está a escrever...</div>}
+          
+          {isTyping && (
+            <div style={{ alignSelf: 'flex-start', background: '#21262d', color: '#8b949e', padding: '12px 16px', borderRadius: '8px', fontSize: '13px' }}>
+              A processar biometria...
+            </div>
+          )}
+          <div ref={chatEndRef} />
         </div>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '10px' }}>
           <input 
             type="text" 
             value={currentInput}
             onChange={(e) => setCurrentInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-            placeholder="Ex: Como está a minha carga comparada com ontem?"
-            style={{ flex: 1, padding: '12px', borderRadius: '6px', border: '1px solid #30363d', background: '#0d1117', color: '#fff' }}
+            onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+            placeholder="Ex: Considerando o stress de hoje, devo manter as séries?"
+            style={{ 
+              flex: 1, padding: '14px', borderRadius: '6px', border: '1px solid #30363d', 
+              background: '#161b22', color: '#fff', outline: 'none', fontSize: '14px' 
+            }}
           />
-          <button onClick={handleSendMessage} style={{ padding: '0 24px', background: '#00c3ff', color: '#000', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>
+          <button 
+            onClick={handleSendMessage} 
+            disabled={isTyping}
+            style={{ 
+              padding: '0 24px', background: isTyping ? '#30363d' : '#1f6feb', color: '#fff', 
+              border: 'none', borderRadius: '6px', cursor: isTyping ? 'not-allowed' : 'pointer', fontWeight: '500' 
+            }}>
             Enviar
           </button>
         </div>
