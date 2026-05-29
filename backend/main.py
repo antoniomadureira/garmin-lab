@@ -16,7 +16,7 @@ import re
 import garminconnect
 from google import genai
 
-app = FastAPI(title="Garmin Dashboard API", version="1.0.8")
+app = FastAPI(title="Garmin Dashboard API", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -111,21 +111,16 @@ async def logout(request: Request):
 def get_training_focus(api: garminconnect.Garmin = Depends(get_api)):
     try:
         today = date.today().strftime("%Y-%m-%d")
-        
         def fetch_readiness():
             try: return api.get_training_readiness(today)
             except Exception: return {}
-            
         def fetch_status():
             try: return api.get_training_status(today)
             except Exception: return {}
 
-        readiness = fetch_with_cache(f"readiness_{id(api)}_{today}", fetch_readiness)
-        status = fetch_with_cache(f"status_{id(api)}_{today}", fetch_status)
-
         return {
-            "readiness": readiness,
-            "status": status
+            "readiness": fetch_with_cache(f"readiness_{id(api)}_{today}", fetch_readiness),
+            "status": fetch_with_cache(f"status_{id(api)}_{today}", fetch_status)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -135,7 +130,6 @@ def get_training_focus(api: garminconnect.Garmin = Depends(get_api)):
 def get_ai_briefing(api: garminconnect.Garmin = Depends(get_api)):
     try:
         today = date.today().strftime("%Y-%m-%d")
-        
         try:
             sleep_data = api.get_sleep_data(today) or {}
             stats = api.get_stats(today) or {}
@@ -162,7 +156,6 @@ def get_ai_briefing(api: garminconnect.Garmin = Depends(get_api)):
             return {"briefing": response.text}
         except Exception as err:
             return {"briefing": f"🔴 Erro de IA: {str(err)}"}
-
     except Exception as e:
         return {"briefing": f"Erro de servidor: {str(e)}"}
 
@@ -172,14 +165,9 @@ def ask_pt(req: ChatRequest, api: garminconnect.Garmin = Depends(get_api)):
         today = date.today().strftime("%Y-%m-%d")
         stats = api.get_stats(today) or {}
         stress = stats.get("averageStressLevel", "Desconhecido")
-        
-        prompt = f"""
-        És o treinador pessoal do Tomás. Ele corre para a Maratona de Madrid, faz reforço com peso corporal e gere o desgaste do Caminho de Santiago. Stress médio hoje: {stress}/100. Responde à pergunta: {req.message}
-        """
-
+        prompt = f"És o treinador pessoal do Tomás. Ele corre para a Maratona de Madrid, faz reforço com peso corporal e gere o Caminho de Santiago. Stress médio hoje: {stress}/100. Responde à pergunta: {req.message}"
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key: return {"reply": "🔴 Erro: GEMINI_API_KEY em falta."}
-
         try:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
@@ -217,7 +205,6 @@ def get_activities_ytd(api: garminconnect.Garmin = Depends(get_api)):
         hoje = date.today()
         inicio_ano = date(hoje.year, 1, 1).strftime("%Y-%m-%d")
         fim = hoje.strftime("%Y-%m-%d")
-        
         cache_key = f"activities_ytd_{id(api)}_{inicio_ano}_{fim}"
         data = fetch_with_cache(cache_key, lambda: api.get_activities_by_date(inicio_ano, fim, ""))
         
@@ -243,10 +230,61 @@ def get_heartrate(date_str: str = None, api: garminconnect.Garmin = Depends(get_
     d = date_str or date.today().strftime("%Y-%m-%d")
     return fetch_with_cache(f"hr_{id(api)}_{d}", lambda: api.get_heart_rates(d))
 
+@app.get("/heartrate/weekly")
+def get_heartrate_weekly(days: int = 7, api: garminconnect.Garmin = Depends(get_api)):
+    cache_key = f"hr_weekly_{id(api)}_{days}_{date.today()}"
+    def fetch_weekly_hr():
+        results = []
+        today = date.today()
+        for i in range(days - 1, -1, -1):
+            d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+            try:
+                data = api.get_heart_rates(d)
+                results.append({
+                    "date": d,
+                    "restingHR": data.get("restingHeartRate"),
+                    "maxHR": data.get("maxHeartRate"),
+                    "minHR": data.get("minHeartRate"),
+                })
+            except Exception:
+                results.append({"date": d, "restingHR": None, "maxHR": None})
+        return results
+    try:
+        return fetch_with_cache(cache_key, fetch_weekly_hr)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/sleep")
 def get_sleep(date_str: str = None, api: garminconnect.Garmin = Depends(get_api)):
     d = date_str or date.today().strftime("%Y-%m-%d")
     return fetch_with_cache(f"sleep_{id(api)}_{d}", lambda: api.get_sleep_data(d))
+
+@app.get("/sleep/weekly")
+def get_sleep_weekly(days: int = 7, api: garminconnect.Garmin = Depends(get_api)):
+    cache_key = f"sleep_weekly_{id(api)}_{days}_{date.today()}"
+    def fetch_weekly_sleep():
+        results = []
+        today = date.today()
+        for i in range(days - 1, -1, -1):
+            d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+            try:
+                raw = api.get_sleep_data(d)
+                summary = raw.get("dailySleepDTO", {})
+                results.append({
+                    "date": d,
+                    "sleepScore": summary.get("sleepScores", {}).get("overall", {}).get("value"),
+                    "deepSleepSeconds": summary.get("deepSleepSeconds"),
+                    "lightSleepSeconds": summary.get("lightSleepSeconds"),
+                    "remSleepSeconds": summary.get("remSleepSeconds"),
+                    "awakeSleepSeconds": summary.get("awakeSleepSeconds"),
+                })
+            except Exception:
+                results.append({"date": d})
+        return results
+    try:
+        return fetch_with_cache(cache_key, fetch_weekly_sleep)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/steps")
 def get_steps(days: int = 7, api: garminconnect.Garmin = Depends(get_api)):
@@ -274,4 +312,4 @@ def get_stress(date_str: str = None, api: garminconnect.Garmin = Depends(get_api
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.8"}
+    return {"status": "ok", "version": "1.1.0"}
