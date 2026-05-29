@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Brain, Send, Loader2 } from 'lucide-react';
-import { BASE_URL } from './config.js';
+import { BASE_URL } from './config.js'; 
 
 export default function AICoach({ briefing, setBriefing }) {
   const [loadingBriefing, setLoadingBriefing] = useState(!briefing);
@@ -9,16 +9,15 @@ export default function AICoach({ briefing, setBriefing }) {
   const [loadingChat, setLoadingChat] = useState(false);
 
   useEffect(() => {
-    if (briefing) return; // Usa a cache se já existir
+    if (briefing) return; 
 
     const fetchBriefing = async () => {
       try {
         const token = localStorage.getItem("garmin_token");
-        const res = await fetch(`${BASE_URL}/briefing`, {
+        const res = await fetch(`${BASE_URL}/briefing`, { 
           headers: { "Authorization": `Bearer ${token}` }
         });
         
-        // Interceta o 401 e recarrega a app para limpar a sessão morta
         if (res.status === 401) {
           localStorage.removeItem("garmin_token");
           window.location.reload();

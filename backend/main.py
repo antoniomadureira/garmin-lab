@@ -111,19 +111,35 @@ async def logout(request: Request):
 def get_training_focus(api: garminconnect.Garmin = Depends(get_api)):
     try:
         today = date.today().strftime("%Y-%m-%d")
+
         def fetch_readiness():
-            try: return api.get_training_readiness(today)
-            except Exception: return {}
+            try:
+                readiness_data = api.get_training_readiness(today)
+                # Normalização para prontidão
+                if readiness_data and "dailyReadinessDTO" in readiness_data:
+                    return readiness_data["dailyReadinessDTO"]
+                elif readiness_data and "latestDailyReadinessDTO" in readiness_data:
+                    return readiness_data["latestDailyReadinessDTO"]
+                return readiness_data
+            except Exception as e:
+                print(f"Erro ao obter prontidão de treino: {e}")
+                return None
+
         def fetch_status():
-            try: return api.get_training_status(today)
-            except Exception: return {}
+            try:
+                status_data = api.get_training_status(today)
+                # Normalização para estado de treino (se necessário, pode ser mais simples)
+                return status_data
+            except Exception as e:
+                print(f"Erro ao obter estado de treino: {e}")
+                return None
 
         return {
             "readiness": fetch_with_cache(f"readiness_{id(api)}_{today}", fetch_readiness),
             "status": fetch_with_cache(f"status_{id(api)}_{today}", fetch_status)
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Erro interno do servidor: {e}")
 
 # ── IA Briefing & Chat ────────────────────────────────────────────
 @app.get("/briefing")
