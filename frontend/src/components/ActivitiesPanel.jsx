@@ -18,7 +18,6 @@ const findGarminValue = (obj, possibleKeys) => {
   return result;
 };
 
-// Extrator específico para os sub-componentes de Prontidão (Sono, Recuperação, etc.)
 const getComponentStatus = (focusData, keyword) => {
   let status = '--';
   const search = (node) => {
@@ -32,6 +31,14 @@ const getComponentStatus = (focusData, keyword) => {
   search(focusData?.readiness);
   return status;
 };
+
+// ESCUDO ANTI-CRASH: Garante que os valores são sempre convertidos para texto com segurança
+const safeText = (val) => {
+  if (val === null || val === undefined) return '--';
+  if (typeof val === 'object') return val.status || val.statusText || val.value || '--';
+  return String(val);
+};
+const safeLower = (val) => safeText(val).toLowerCase();
 
 export default function ActivitiesPanel() {
   const [activities, setActivities] = useState([]);
@@ -91,15 +98,19 @@ export default function ActivitiesPanel() {
   const totalDurationHours = Math.floor(totalDurationMins / 60);
 
   // --- LÓGICA DO "EM FOCO" (Extração Blindada) ---
-  const rScore = findGarminValue(focusData?.readiness, ['readinessValue', 'readinessScore', 'score', 'value']) ?? '--';
+  const rScoreObj = findGarminValue(focusData?.readiness, ['readinessValue', 'readinessScore', 'score', 'value']);
+  const rScore = typeof rScoreObj === 'number' || typeof rScoreObj === 'string' ? rScoreObj : '--';
+  
   const rIndicator = findGarminValue(focusData?.readiness, ['readinessIndicator', 'indicatorText', 'statusLabel']) ?? 'A Sincronizar';
   
   const getReadinessColor = (val) => {
     if(val === '--') return '#5C738F';
-    if(val < 30) return '#FF3A5C'; 
-    if(val < 50) return '#F59E0B'; 
-    if(val < 70) return '#00D47E'; 
-    if(val < 85) return '#00BFFF'; 
+    const num = Number(val);
+    if(isNaN(num)) return '#5C738F';
+    if(num < 30) return '#FF3A5C'; 
+    if(num < 50) return '#F59E0B'; 
+    if(num < 70) return '#00D47E'; 
+    if(num < 85) return '#00BFFF'; 
     return '#8B7FFF';              
   };
 
@@ -135,7 +146,7 @@ export default function ActivitiesPanel() {
     const dayDist = dayRuns.reduce((acc, r) => acc + (r.distance || 0), 0);
     chart7d.push({ label: d.toLocaleDateString('pt-PT', {weekday:'short'}).charAt(0).toUpperCase(), val: dayDist });
   }
-  const max7d = Math.max(...chart7d.map(d => d.val), 1) * 1.2; // 20% de margem no topo
+  const max7d = Math.max(...chart7d.map(d => d.val), 1) * 1.2; 
 
   // --- Lógica do Gráfico de Volume ---
   const getChartData = () => {
@@ -236,19 +247,19 @@ export default function ActivitiesPanel() {
               <svg viewBox="0 0 36 36" style={{ width: '70px', height: '70px', overflow: 'visible' }}>
                 <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#2C2C2E" strokeWidth="3.5" />
                 <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke={getReadinessColor(rScore)} strokeWidth="3.5" strokeDasharray={`${rScore === '--' ? 0 : rScore}, 100`} strokeLinecap="round" />
-                <text x="18" y="23" fontSize="12" fill="#DDE6F5" textAnchor="middle" fontWeight="700">{rScore}</text>
+                <text x="18" y="23" fontSize="12" fill="#DDE6F5" textAnchor="middle" fontWeight="700">{safeText(rScore)}</text>
               </svg>
               <div>
-                <div style={{ color: '#DDE6F5', fontSize: '22px', fontWeight: 700, textTransform: 'capitalize' }}>{rIndicator.toLowerCase()}</div>
+                <div style={{ color: '#DDE6F5', fontSize: '22px', fontWeight: 700, textTransform: 'capitalize' }}>{safeLower(rIndicator)}</div>
                 <div style={{ color: '#8b949e', fontSize: '12px' }}>Atualizado hoje</div>
               </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '8px' }}>
-              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{sleepStatus.toLowerCase()}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Sono</div></div>
-              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{recoveryStatus.toLowerCase()}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Recuperação</div></div>
-              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{hrvStatus.toLowerCase()}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Estado VFC</div></div>
-              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{acuteLoadStatus.toLowerCase()}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Carga Aguda</div></div>
+              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{safeLower(sleepStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Sono</div></div>
+              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{safeLower(recoveryStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Recuperação</div></div>
+              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{safeLower(hrvStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Estado VFC</div></div>
+              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{safeLower(acuteLoadStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Carga Aguda</div></div>
             </div>
           </div>
 
@@ -269,7 +280,7 @@ export default function ActivitiesPanel() {
 
             <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '110px', marginTop: 'auto', borderBottom: '1px solid #2C2C2E', paddingBottom: '4px' }}>
               {chart7d.map((d, i) => {
-                const hPercentage = d.val > 0 ? Math.max((d.val / max7d) * 100, 5) : 0; // Altura minima de 5%
+                const hPercentage = d.val > 0 ? Math.max((d.val / max7d) * 100, 5) : 0;
                 return (
                   <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, height: '100%', justifyContent: 'flex-end' }}>
                     {d.val > 0 && (
@@ -295,14 +306,14 @@ export default function ActivitiesPanel() {
                 <div style={{ width: '40px', height: '40px', borderRadius: '20px', background: '#00BFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
                   <Activity size={20} color="#0B1221" />
                 </div>
-                <div style={{ color: '#DDE6F5', fontSize: '22px', fontWeight: 700, textTransform: 'capitalize' }}>{tStatus.toLowerCase()}</div>
-                <div style={{ color: '#DDE6F5', fontSize: '12px', marginTop: '2px', textTransform: 'capitalize' }}>Foco: {tLoadFocus.toLowerCase()}</div>
+                <div style={{ color: '#DDE6F5', fontSize: '22px', fontWeight: 700, textTransform: 'capitalize' }}>{safeLower(tStatus)}</div>
+                <div style={{ color: '#DDE6F5', fontSize: '12px', marginTop: '2px', textTransform: 'capitalize' }}>Foco: {safeLower(tLoadFocus)}</div>
               </div>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
-                <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '14px', textTransform: 'capitalize'}}>{tVo2}</div><div style={{color: '#8b949e', fontSize: '11px'}}>VO2 Max</div></div>
-                <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '14px', textTransform: 'capitalize'}}>{tLoad.toLowerCase()}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Carga</div></div>
-                <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '14px', textTransform: 'capitalize'}}>{tHrvStatus.toLowerCase()}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Estado VFC</div></div>
+                <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '14px', textTransform: 'capitalize'}}>{safeText(tVo2)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>VO2 Max</div></div>
+                <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '14px', textTransform: 'capitalize'}}>{safeLower(tLoad)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Carga</div></div>
+                <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '14px', textTransform: 'capitalize'}}>{safeLower(tHrvStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Estado VFC</div></div>
               </div>
             </div>
 
