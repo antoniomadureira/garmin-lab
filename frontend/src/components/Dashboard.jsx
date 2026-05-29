@@ -1,19 +1,21 @@
 import { useState } from "react";
-import { Activity, Heart, Moon, BarChart2, Brain, Watch, LogOut, RefreshCw } from "lucide-react";
+import { Activity, Heart, Moon, BarChart2, Brain, Watch, LogOut, RefreshCw, TrendingUp } from "lucide-react";
 import ActivitiesPanel from "./ActivitiesPanel.jsx";
 import HeartRatePanel from "./HeartRatePanel.jsx";
 import SleepPanel from "./SleepPanel.jsx";
 import StepsPanel from "./StepsPanel.jsx";
-import AICoach from "../AICoach.jsx"; // Verifica se o caminho está correto
+import AICoach from "../AICoach.jsx"; 
+import ProgressPanel from "./ProgressPanel.jsx";
 
 const C = {
   bg0: "#05090F", bg1: "#0B1221", border: "#1C2D47",
   accent: "#00BFFF", run: "#FF6230", heart: "#FF3A5C",
-  sleep: "#8B7FFF", steps: "#00D47E", ai: "#1f6feb", muted: "#5C738F", text: "#DDE6F5",
+  sleep: "#8B7FFF", steps: "#00D47E", ai: "#1f6feb", progress: "#F59E0B", muted: "#5C738F", text: "#DDE6F5",
 };
 
 const TABS = [
   { id: "activities", label: "Atividades", icon: Activity, color: C.run },
+  { id: "progress",   label: "Progresso", icon: TrendingUp, color: C.progress },
   { id: "heartrate",  label: "Frequência Cardíaca", icon: Heart, color: C.heart },
   { id: "sleep",      label: "Sono", icon: Moon, color: C.sleep },
   { id: "steps",      label: "Passos & Calorias", icon: BarChart2, color: C.steps },
@@ -26,6 +28,7 @@ export default function Dashboard({ displayName, onLogout }) {
 
   const panels = {
     activities: <ActivitiesPanel key={`act-${refreshKey}`} />,
+    progress:   <ProgressPanel   key={`prg-${refreshKey}`} />,
     heartrate:  <HeartRatePanel  key={`hr-${refreshKey}`} />,
     sleep:      <SleepPanel      key={`sl-${refreshKey}`} />,
     steps:      <StepsPanel      key={`st-${refreshKey}`} />,
@@ -77,6 +80,7 @@ export default function Dashboard({ displayName, onLogout }) {
         background: C.bg1, borderBottom: `1px solid ${C.border}`,
         padding: "0 28px", display: "flex", gap: 2,
         position: "sticky", top: 66, zIndex: 99,
+        overflowX: 'auto'
       }}>
         {TABS.map(t => {
           const Icon = t.icon;
