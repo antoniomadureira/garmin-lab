@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Activity, Clock, Flame } from 'lucide-react';
+import { BASE_URL } from '../config.js';
 
 export default function ProgressPanel() {
   const [activities, setActivities] = useState([]);
@@ -8,23 +9,39 @@ export default function ProgressPanel() {
   const [period, setPeriod] = useState('YTD'); 
   const [hoveredPoint, setHoveredPoint] = useState(null); 
 
-  const token = localStorage.getItem("garmin_token");
-  const baseUrl = "https://garmin-lab.onrender.com";
-
   useEffect(() => {
+    let shouldFetchActivities = true;
+    const token = localStorage.getItem("garmin_token");
+    
+    // Controlo de Cache
+    const cachedData = localStorage.getItem("garmin_activities_ytd");
+    const cachedTs = localStorage.getItem("garmin_activities_ytd_ts");
+    
+    if (cachedData && cachedTs && (Date.now() - parseInt(cachedTs) < 3600000)) {
+      setActivities(JSON.parse(cachedData));
+      setLoading(false);
+      shouldFetchActivities = false;
+    }
+
     const fetchYTD = async () => {
       try {
-        // Usar cache se existir para não esperar
-        const cachedData = localStorage.getItem("garmin_activities_ytd");
-        if (cachedData) setActivities(JSON.parse(cachedData));
+        if (shouldFetchActivities) {
+          const resAct = await fetch(`${BASE_URL}/activities/ytd`, { 
+            headers: { "Authorization": `Bearer ${token}` } 
+          });
+          
+          if (resAct.status === 401) { 
+            localStorage.removeItem("garmin_token"); window.location.reload(); return; 
+          }
 
-        const res = await fetch(`${baseUrl}/activities/ytd`, { headers: { "Authorization": `Bearer ${token}` } });
-        if (!res.ok) throw new Error("Erro de rede");
-        const data = await res.json();
-        
-        const validData = Array.isArray(data) ? data : [];
-        setActivities(validData);
-        localStorage.setItem("garmin_activities_ytd", JSON.stringify(validData));
+          if (resAct.ok) {
+            const data = await resAct.json();
+            const validData = Array.isArray(data) ? data : [];
+            setActivities(validData);
+            localStorage.setItem("garmin_activities_ytd", JSON.stringify(validData));
+            localStorage.setItem("garmin_activities_ytd_ts", Date.now().toString());
+          }
+        }
       } catch (error) {
         if (!activities.length) setActivities([]);
       } finally {
@@ -32,7 +49,7 @@ export default function ProgressPanel() {
       }
     };
     fetchYTD();
-  }, [baseUrl, token]);
+  }, []);
 
   const getChartData = () => {
     if (activities.length === 0) return [];
@@ -43,7 +60,6 @@ export default function ProgressPanel() {
     
     let points = [];
 
-    // Lógica de Agregação Correta (Agrupamento real)
     if (period === '7D') {
       for (let i = 6; i >= 0; i--) {
         let d = new Date(now);
@@ -55,7 +71,6 @@ export default function ProgressPanel() {
         });
       }
     } else if (period === '1M') {
-      // Divide 30 dias em 5 blocos exatos de 6 dias
       for (let i = 4; i >= 0; i--) {
          let start = new Date(now);
          start.setDate(now.getDate() - (i * 6 + 5));
@@ -71,7 +86,6 @@ export default function ProgressPanel() {
          });
       }
     } else {
-      // Agregação Estrita por MÊS para escalas maiores
       let numMonths = 3;
       if (period === '6M') numMonths = 6;
       if (period === 'YTD') numMonths = now.getMonth() + 1;
@@ -87,7 +101,6 @@ export default function ProgressPanel() {
       }
     }
 
-    // Injetar os valores nos baldes agregados
     runs.forEach(run => {
       if (!run.startTimeLocal) return;
       const runDate = new Date(run.startTimeLocal);
@@ -111,7 +124,6 @@ export default function ProgressPanel() {
   };
 
   const chartData = getChartData();
-  // Garante que o topo do gráfico tem margem respirável (+10%)
   const maxVal = Math.max(...chartData.map(d => d[activeMetric]), 1) * 1.1; 
   const totalVal = chartData.reduce((acc, curr) => acc + curr[activeMetric], 0);
 
@@ -143,7 +155,6 @@ export default function ProgressPanel() {
       
       <div style={{ background: '#0B1221', padding: '32px', borderRadius: '16px', border: '1px solid #1C2D47' }}>
         
-        {/* Top Controls */}
         <div style={{ display: 'flex', gap: '12px', marginBottom: '32px', flexWrap: 'wrap' }}>
           <button onClick={() => setActiveMetric('distance')} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', color: activeMetric === 'distance' ? '#FF6230' : '#DDE6F5', border: `1px solid ${activeMetric === 'distance' ? '#FF6230' : '#1C2D47'}`, padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontSize: '14px', fontWeight: 500, transition: '0.2s' }}>
             <Activity size={16} /> Distância
@@ -156,7 +167,6 @@ export default function ProgressPanel() {
           </button>
         </div>
 
-        {/* Info do Total */}
         <div style={{ marginBottom: '24px' }}>
           <h2 style={{ color: '#DDE6F5', fontSize: '16px', margin: '0 0 4px 0', fontWeight: 600 }}>{title}</h2>
           <div style={{ fontSize: '48px', fontWeight: 800, color: '#DDE6F5', letterSpacing: '-1px' }}>
@@ -164,11 +174,9 @@ export default function ProgressPanel() {
           </div>
         </div>
 
-        {/* Engine SVG */}
         <div style={{ position: 'relative', width: '100%', marginTop: '40px' }}>
           <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', minWidth: '600px', display: 'block', overflow: 'visible' }}>
             
-            {/* Grid Horizontal */}
             <line x1={0} y1={paddingY} x2={width} y2={paddingY} stroke="#1C2D47" strokeWidth="1" />
             <text x={width - 40} y={paddingY - 8} fill="#5C738F" fontSize="12">{Math.round(maxVal)} {unit}</text>
             
@@ -178,7 +186,6 @@ export default function ProgressPanel() {
             <line x1={0} y1={height - paddingY} x2={width} y2={height - paddingY} stroke="#1C2D47" strokeWidth="1" />
             <text x={width - 40} y={height - paddingY - 8} fill="#5C738F" fontSize="12">0 {unit}</text>
             
-            {/* Gradient */}
             <polygon points={polygonPoints} fill="url(#grad)" opacity="0.3" />
             <defs>
               <linearGradient id="grad" x1="0" x2="0" y1="0" y2="1">
@@ -187,7 +194,6 @@ export default function ProgressPanel() {
               </linearGradient>
             </defs>
 
-            {/* Crosshair (Rato em cima) */}
             {hoveredPoint && (
               <line 
                 x1={hoveredPoint.x} y1={paddingY} 
@@ -196,7 +202,6 @@ export default function ProgressPanel() {
               />
             )}
 
-            {/* Linha de Tendência */}
             <polyline points={pointsString} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
             
             {chartData.map((d, i) => {
@@ -209,7 +214,6 @@ export default function ProgressPanel() {
                   <circle cx={x} cy={y} r={hoveredPoint && hoveredPoint.index === i ? "6" : "4"} fill="#0B1221" stroke={color} strokeWidth={hoveredPoint && hoveredPoint.index === i ? "3" : "2"} style={{ transition: 'r 0.2s' }} />
                   <text x={x} y={height - 10} fill={hoveredPoint && hoveredPoint.index === i ? "#DDE6F5" : "#5C738F"} fontSize="11" textAnchor="middle" style={{ transition: 'fill 0.2s' }}>{d.label}</text>
                   
-                  {/* Zona de Deteção de Rato */}
                   <rect 
                     x={x - (stepX / 2)} y={paddingY} width={stepX} height={height - paddingY * 2} 
                     fill="transparent" style={{ cursor: 'crosshair' }}
@@ -221,7 +225,6 @@ export default function ProgressPanel() {
             })}
           </svg>
 
-          {/* Tooltip HTML */}
           {hoveredPoint && (
             <div style={{
               position: 'absolute',
@@ -247,7 +250,6 @@ export default function ProgressPanel() {
           )}
         </div>
 
-        {/* Seletores de Período */}
         <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '32px', borderTop: '1px solid #1C2D47', paddingTop: '24px', flexWrap: 'wrap' }}>
           {['7D', '1M', '3M', '6M', 'YTD', '1Y'].map(p => (
             <button 

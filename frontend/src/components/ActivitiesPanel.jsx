@@ -1,44 +1,52 @@
 import { useState, useEffect } from 'react';
-import { Activity, Flame, Clock, Calendar, Heart, Zap, BarChart2 } from 'lucide-react';
+import { Activity, Flame, Clock, Calendar, Heart, Zap, BarChart2, Info } from 'lucide-react';
+import { BASE_URL } from '../config.js';
 
-// O "SUPER CAÇADOR DE CHAVES": Encontra a chave em qualquer pasta do JSON da Garmin
-const findGarminValue = (obj, possibleKeys) => {
-  let result = null;
-  const search = (node) => {
-    if (result !== null || !node || typeof node !== 'object') return;
-    for (let key of possibleKeys) {
-      if (key in node && node[key] !== null && node[key] !== undefined && node[key] !== '') {
-        result = node[key];
-        return;
-      }
-    }
-    Object.values(node).forEach(search);
+// Dicionário Oficial Garmin (Fenix PT-BR / PT-PT)
+const pt = (val) => {
+  if (val === null || val === undefined || val === '--') return '--';
+  const str = String(val).toUpperCase();
+  const dict = {
+    'POOR': 'Fraca', 'LOW': 'Baixa', 'MODERATE': 'Moderada', 'HIGH': 'Alta', 
+    'EXCELLENT': 'Excelente', 'PRIME': 'Máxima', 'BALANCED': 'Equilibrado', 
+    'UNBALANCED': 'Desequilibrado', 'OPTIMAL': 'Ideal', 'MAINTAINING': 'Manutenção', 
+    'PRODUCTIVE': 'Produtivo', 'RECOVERY': 'Recuperação', 'UNPRODUCTIVE': 'Improdutivo', 
+    'DETRAINING': 'Destreino', 'OVERREACHING': 'Esforço Excessivo', 'PEAKING': 'Pico', 
+    'SHORTAGE': 'Em Falta', 'STRAINED': 'Tenso', 'NO STATUS': 'Sem Estado',
+    'AEROBIC SHORTAGE': 'Escassez Aeróbica', 'ANAEROBIC SHORTAGE': 'Escassez Anaeróbica'
   };
-  search(obj);
-  return result;
+  return dict[str] || String(val);
 };
 
-const getComponentStatus = (focusData, keyword) => {
-  let status = '--';
-  const search = (node) => {
-    if (status !== '--' || !node || typeof node !== 'object') return;
-    if (node.componentType && typeof node.componentType === 'string' && node.componentType.includes(keyword)) {
-      status = node.status || node.statusText || '--';
-      return;
-    }
-    Object.values(node).forEach(search);
-  };
-  search(focusData?.readiness);
-  return status;
+const Tooltip = ({ title, text, visible }) => {
+  if (!visible) return null;
+  return (
+    <div style={{
+      position: 'absolute', top: '100%', left: '0', zIndex: 50, marginTop: '8px',
+      background: '#162233', border: '1px solid #1C2D47', padding: '16px', borderRadius: '12px',
+      boxShadow: '0 10px 30px rgba(0,0,0,0.8)', width: '300px', color: '#8b949e', fontSize: '12px', lineHeight: '1.5'
+    }}>
+      <div style={{ color: '#DDE6F5', fontWeight: 700, fontSize: '13px', marginBottom: '8px' }}>{title}</div>
+      <div dangerouslySetInnerHTML={{ __html: text }} />
+    </div>
+  );
 };
 
-// ESCUDO ANTI-CRASH: Garante que os valores são sempre convertidos para texto com segurança
-const safeText = (val) => {
-  if (val === null || val === undefined) return '--';
-  if (typeof val === 'object') return val.status || val.statusText || val.value || '--';
-  return String(val);
+const getLatest = (data) => {
+  if (!data) return {};
+  if (Array.isArray(data)) return data[data.length - 1] || {};
+  return data;
 };
-const safeLower = (val) => safeText(val).toLowerCase();
+
+const getComponentStatus = (readinessObj, keyword) => {
+  if (!readinessObj) return '--';
+  const comps = readinessObj.components || readinessObj.latestDailyReadinessDTO?.components || [];
+  if (Array.isArray(comps)) {
+    const comp = comps.find(c => c.componentType && c.componentType.toUpperCase().includes(keyword));
+    return comp ? (comp.status || comp.statusText || '--') : '--';
+  }
+  return '--';
+};
 
 export default function ActivitiesPanel() {
   const [activities, setActivities] = useState([]);
@@ -46,6 +54,7 @@ export default function ActivitiesPanel() {
   const [loading, setLoading] = useState(true);
   const [activeMetric, setActiveMetric] = useState('distance'); 
   const [showAllActivities, setShowAllActivities] = useState(false);
+  const [hoverInfo, setHoverInfo] = useState(null);
   
   const getInitialDates = () => {
     const today = new Date();
@@ -60,24 +69,48 @@ export default function ActivitiesPanel() {
   const [startDate, setStartDate] = useState(getInitialDates().start);
   const [endDate, setEndDate] = useState(getInitialDates().end);
 
-  const token = localStorage.getItem("garmin_token");
-  const baseUrl = "https://garmin-lab.onrender.com";
-
   useEffect(() => {
+    let shouldFetchActivities = true;
+    const token = localStorage.getItem("garmin_token");
+    
+    // Controlo inteligente de Cache (1 Hora TTL)
     const cachedData = localStorage.getItem("garmin_activities_ytd");
-    if (cachedData) { setActivities(JSON.parse(cachedData)); setLoading(false); }
+    const cachedTs = localStorage.getItem("garmin_activities_ytd_ts");
+    
+    if (cachedData && cachedTs && (Date.now() - parseInt(cachedTs) < 3600000)) {
+      setActivities(JSON.parse(cachedData));
+      setLoading(false);
+      shouldFetchActivities = false;
+    }
 
     const fetchAllData = async () => {
       try {
-        const resAct = await fetch(`${baseUrl}/activities/ytd`, { headers: { "Authorization": `Bearer ${token}` } });
-        if (resAct.ok) {
-          const data = await resAct.json();
-          const validData = Array.isArray(data) ? data : [];
-          setActivities(validData);
-          localStorage.setItem("garmin_activities_ytd", JSON.stringify(validData));
+        if (shouldFetchActivities) {
+          const resAct = await fetch(`${BASE_URL}/activities/ytd`, { 
+            headers: { "Authorization": `Bearer ${token}` } 
+          });
+          
+          if (resAct.status === 401) { 
+            localStorage.removeItem("garmin_token"); window.location.reload(); return; 
+          }
+          
+          if (resAct.ok) {
+            const data = await resAct.json();
+            const validData = Array.isArray(data) ? data : [];
+            setActivities(validData);
+            localStorage.setItem("garmin_activities_ytd", JSON.stringify(validData));
+            localStorage.setItem("garmin_activities_ytd_ts", Date.now().toString());
+          }
         }
 
-        const resFocus = await fetch(`${baseUrl}/training-focus`, { headers: { "Authorization": `Bearer ${token}` } });
+        const resFocus = await fetch(`${BASE_URL}/training-focus`, { 
+          headers: { "Authorization": `Bearer ${token}` } 
+        });
+        
+        if (resFocus.status === 401) { 
+          localStorage.removeItem("garmin_token"); window.location.reload(); return; 
+        }
+        
         if (resFocus.ok) {
           setFocusData(await resFocus.json());
         }
@@ -88,20 +121,15 @@ export default function ActivitiesPanel() {
       }
     };
     fetchAllData();
-  }, [baseUrl, token]);
+  }, []);
 
-  // Cálculos YTD
-  const runs = activities.filter(a => a.activityType.includes('running'));
-  const totalDistance = runs.reduce((acc, curr) => acc + (curr.distance || 0), 0).toFixed(1);
-  const totalCalories = activities.reduce((acc, curr) => acc + (curr.calories || 0), 0);
-  const totalDurationMins = activities.reduce((acc, curr) => acc + (curr.duration || 0), 0);
-  const totalDurationHours = Math.floor(totalDurationMins / 60);
+  const latestReadiness = getLatest(focusData?.readiness);
+  const latestStatus = getLatest(focusData?.status);
 
-  // --- LÓGICA DO "EM FOCO" (Extração Blindada) ---
-  const rScoreObj = findGarminValue(focusData?.readiness, ['readinessValue', 'readinessScore', 'score', 'value']);
-  const rScore = typeof rScoreObj === 'number' || typeof rScoreObj === 'string' ? rScoreObj : '--';
-  
-  const rIndicator = findGarminValue(focusData?.readiness, ['readinessIndicator', 'indicatorText', 'statusLabel']) ?? 'A Sincronizar';
+  const rScoreRaw = latestReadiness.readinessValue ?? latestReadiness.readinessScore ?? latestReadiness.latestDailyReadinessDTO?.readinessValue;
+  const rScore = rScoreRaw !== undefined ? rScoreRaw : '--';
+  const rIndicatorRaw = latestReadiness.readinessIndicator ?? latestReadiness.statusText ?? latestReadiness.latestDailyReadinessDTO?.readinessIndicator;
+  const rIndicator = rIndicatorRaw !== undefined ? rIndicatorRaw : 'A Sincronizar';
   
   const getReadinessColor = (val) => {
     if(val === '--') return '#5C738F';
@@ -114,18 +142,32 @@ export default function ActivitiesPanel() {
     return '#8B7FFF';              
   };
 
-  const sleepStatus = getComponentStatus(focusData, 'SLEEP');
-  const recoveryStatus = getComponentStatus(focusData, 'RECOVERY');
-  const hrvStatus = getComponentStatus(focusData, 'HRV');
-  const acuteLoadStatus = getComponentStatus(focusData, 'LOAD');
+  const sleepStatus = getComponentStatus(latestReadiness, 'SLEEP');
+  const recoveryStatus = getComponentStatus(latestReadiness, 'RECOVERY');
+  const hrvStatusComp = getComponentStatus(latestReadiness, 'HRV');
+  const acuteLoadStatus = getComponentStatus(latestReadiness, 'LOAD');
 
-  const tStatus = findGarminValue(focusData?.status, ['trainingStatus', 'statusText']) ?? 'A Sincronizar';
-  const tLoadFocus = findGarminValue(focusData?.status, ['loadFocus']) ?? '--';
-  const tVo2 = findGarminValue(focusData?.status, ['vo2MaxStatus', 'vo2Max']) ?? '--';
-  const tLoad = findGarminValue(focusData?.status, ['loadStatus']) ?? '--';
-  const tHrvStatus = findGarminValue(focusData?.status, ['hrvStatus', 'hrvStatusText']) ?? '--';
+  const tStatusRaw = latestStatus.trainingStatus ?? latestStatus.latestTrainingStatusDTO?.trainingStatus;
+  const tStatus = tStatusRaw !== undefined ? tStatusRaw : 'A Sincronizar';
+  
+  const tLoadFocusRaw = latestStatus.loadFocus ?? latestStatus.latestTrainingStatusDTO?.loadFocus;
+  const tLoadFocus = tLoadFocusRaw !== undefined ? tLoadFocusRaw : '--';
+  
+  const tVo2Raw = latestStatus.mostRecentVO2Max?.vo2MaxValue ?? latestStatus.vo2MaxValue ?? latestStatus.latestTrainingStatusDTO?.vo2MaxStatus;
+  const tVo2 = typeof tVo2Raw === 'number' ? tVo2Raw.toFixed(1) : (tVo2Raw ?? '--');
+  
+  const tLoadRaw = latestStatus.loadStatus ?? latestStatus.latestTrainingStatusDTO?.loadStatus;
+  const tLoad = tLoadRaw !== undefined ? tLoadRaw : '--';
+  
+  const tHrvStatusRaw = latestStatus.hrvStatus ?? latestStatus.latestTrainingStatusDTO?.hrvStatus;
+  const tHrvStatus = tHrvStatusRaw !== undefined ? tHrvStatusRaw : '--';
 
-  // Corrida dos últimos 7 dias (Gráfico atualizado)
+  const runs = activities.filter(a => a.activityType.includes('running'));
+  const totalDistance = runs.reduce((acc, curr) => acc + (curr.distance || 0), 0).toFixed(1);
+  const totalCalories = activities.reduce((acc, curr) => acc + (curr.calories || 0), 0);
+  const totalDurationMins = activities.reduce((acc, curr) => acc + (curr.duration || 0), 0);
+  const totalDurationHours = Math.floor(totalDurationMins / 60);
+
   const now = new Date();
   const start7d = new Date();
   start7d.setDate(now.getDate() - 6);
@@ -146,9 +188,8 @@ export default function ActivitiesPanel() {
     const dayDist = dayRuns.reduce((acc, r) => acc + (r.distance || 0), 0);
     chart7d.push({ label: d.toLocaleDateString('pt-PT', {weekday:'short'}).charAt(0).toUpperCase(), val: dayDist });
   }
-  const max7d = Math.max(...chart7d.map(d => d.val), 1) * 1.2; 
+  const max7d = Math.max(...chart7d.map(d => d.val), 1) * 1.3; 
 
-  // --- Lógica do Gráfico de Volume ---
   const getChartData = () => {
     if (!startDate || !endDate) return [];
     const start = new Date(startDate);
@@ -189,7 +230,6 @@ export default function ActivitiesPanel() {
   const maxMetricValue = Math.max(...chartData.map(d => d[activeMetric]), 1) * 1.1; 
   const showIconsOnBars = chartData.length <= 7;
 
-  // --- Filtro de Atividades ---
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
   const filteredActivities = activities.filter(act => {
@@ -199,7 +239,6 @@ export default function ActivitiesPanel() {
     return actDate.getMonth() === currentMonth && actDate.getFullYear() === currentYear;
   }).sort((a, b) => new Date(b.startTimeLocal) - new Date(a.startTimeLocal));
 
-  // --- Helpers ---
   const formatDuration = (mins) => {
     if (!mins) return "-";
     const h = Math.floor(mins / 60);
@@ -233,33 +272,38 @@ export default function ActivitiesPanel() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      
       <div>
         <h2 style={{ color: '#DDE6F5', fontSize: '20px', fontWeight: 700, marginBottom: '16px' }}>Em Foco</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
           
-          <div style={{ background: '#1c1c1e', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', border: '1px solid #2C2C2E' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#DDE6F5', fontSize: '13px', fontWeight: 600 }}>
-              <Zap size={16} color="#00BFFF" /> Prontidão de Treino
+          <div style={{ background: '#1c1c1e', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', border: '1px solid #2C2C2E', position: 'relative' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#DDE6F5', fontSize: '13px', fontWeight: 600 }}>
+                <Zap size={16} color="#00BFFF" /> Prontidão de Treino
+              </div>
+              <div onMouseEnter={() => setHoverInfo('readiness')} onMouseLeave={() => setHoverInfo(null)} style={{ cursor: 'help', position: 'relative' }}>
+                <Info size={16} color="#5C738F" />
+                <Tooltip visible={hoverInfo === 'readiness'} title="Prontidão (Readiness)" text="Determina o seu nível de prontidão para um treino intenso no dia atual. Baseia-se no seu sono (qualidade e histórico), tempo de recuperação, carga de treino recente e estado da VFC." />
+              </div>
             </div>
             
             <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
               <svg viewBox="0 0 36 36" style={{ width: '70px', height: '70px', overflow: 'visible' }}>
                 <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#2C2C2E" strokeWidth="3.5" />
                 <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke={getReadinessColor(rScore)} strokeWidth="3.5" strokeDasharray={`${rScore === '--' ? 0 : rScore}, 100`} strokeLinecap="round" />
-                <text x="18" y="23" fontSize="12" fill="#DDE6F5" textAnchor="middle" fontWeight="700">{safeText(rScore)}</text>
+                <text x="18" y="23" fontSize="12" fill="#DDE6F5" textAnchor="middle" fontWeight="700">{rScore}</text>
               </svg>
               <div>
-                <div style={{ color: '#DDE6F5', fontSize: '22px', fontWeight: 700, textTransform: 'capitalize' }}>{safeLower(rIndicator)}</div>
+                <div style={{ color: '#DDE6F5', fontSize: '22px', fontWeight: 700, textTransform: 'capitalize' }}>{pt(rIndicator)}</div>
                 <div style={{ color: '#8b949e', fontSize: '12px' }}>Atualizado hoje</div>
               </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '8px' }}>
-              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{safeLower(sleepStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Sono</div></div>
-              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{safeLower(recoveryStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Recuperação</div></div>
-              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{safeLower(hrvStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Estado VFC</div></div>
-              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{safeLower(acuteLoadStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Carga Aguda</div></div>
+              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{pt(sleepStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Sono</div></div>
+              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{pt(recoveryStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Recuperação</div></div>
+              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{pt(hrvStatusComp)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Estado VFC</div></div>
+              <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '13px', textTransform:'capitalize'}}>{pt(acuteLoadStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Carga Aguda</div></div>
             </div>
           </div>
 
@@ -284,11 +328,11 @@ export default function ActivitiesPanel() {
                 return (
                   <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, height: '100%', justifyContent: 'flex-end' }}>
                     {d.val > 0 && (
-                      <span style={{ fontSize: '10px', color: '#DDE6F5', fontWeight: 600, marginBottom: '4px' }}>
+                      <span style={{ fontSize: '11px', color: '#DDE6F5', fontWeight: 700, marginBottom: '6px' }}>
                         {d.val.toFixed(1)}
                       </span>
                     )}
-                    <div style={{ width: '16px', height: `${hPercentage}%`, background: '#00BFFF', borderRadius: '4px 4px 0 0' }}></div>
+                    <div style={{ width: '20px', height: `${hPercentage}%`, background: '#00BFFF', borderRadius: '4px 4px 0 0' }}></div>
                     <span style={{ fontSize: '10px', color: '#8b949e', marginTop: '8px' }}>{d.label}</span>
                   </div>
                 );
@@ -296,9 +340,15 @@ export default function ActivitiesPanel() {
             </div>
           </div>
 
-          <div style={{ background: '#1c1c1e', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', border: '1px solid #2C2C2E' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#DDE6F5', fontSize: '13px', fontWeight: 600, marginBottom: '20px' }}>
-              <BarChart2 size={16} color="#8B7FFF" /> Estado de Treino
+          <div style={{ background: '#1c1c1e', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', border: '1px solid #2C2C2E', position: 'relative' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#DDE6F5', fontSize: '13px', fontWeight: 600 }}>
+                <BarChart2 size={16} color="#8B7FFF" /> Estado de Treino
+              </div>
+              <div onMouseEnter={() => setHoverInfo('status')} onMouseLeave={() => setHoverInfo(null)} style={{ cursor: 'help', position: 'relative' }}>
+                <Info size={16} color="#5C738F" />
+                <Tooltip visible={hoverInfo === 'status'} title="Estado de Treino" text="Muda com base na sua Carga Aguda, no seu VO2 Max e na Variabilidade da Frequência Cardíaca (VFC). Funciona como um excelente guia para manter o treino no caminho certo evitando sobrecargas." />
+              </div>
             </div>
             
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -306,14 +356,31 @@ export default function ActivitiesPanel() {
                 <div style={{ width: '40px', height: '40px', borderRadius: '20px', background: '#00BFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
                   <Activity size={20} color="#0B1221" />
                 </div>
-                <div style={{ color: '#DDE6F5', fontSize: '22px', fontWeight: 700, textTransform: 'capitalize' }}>{safeLower(tStatus)}</div>
-                <div style={{ color: '#DDE6F5', fontSize: '12px', marginTop: '2px', textTransform: 'capitalize' }}>Foco: {safeLower(tLoadFocus)}</div>
+                <div style={{ color: '#DDE6F5', fontSize: '22px', fontWeight: 700, textTransform: 'capitalize' }}>{pt(tStatus)}</div>
+                <div style={{ color: '#DDE6F5', fontSize: '12px', marginTop: '2px', textTransform: 'capitalize' }}>Foco: {pt(tLoadFocus)}</div>
               </div>
               
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left' }}>
-                <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '14px', textTransform: 'capitalize'}}>{safeText(tVo2)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>VO2 Max</div></div>
-                <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '14px', textTransform: 'capitalize'}}>{safeLower(tLoad)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Carga</div></div>
-                <div><div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '14px', textTransform: 'capitalize'}}>{safeLower(tHrvStatus)}</div><div style={{color: '#8b949e', fontSize: '11px'}}>Estado VFC</div></div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'left', position: 'relative' }}>
+                <div onMouseEnter={() => setHoverInfo('vo2')} onMouseLeave={() => setHoverInfo(null)}>
+                  <div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '14px', textTransform: 'capitalize', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer'}}>
+                    {tVo2} <Info size={12} color="#5C738F" />
+                  </div>
+                  <div style={{color: '#8b949e', fontSize: '11px'}}>VO2 Max</div>
+                  <Tooltip visible={hoverInfo === 'vo2'} title="VO2 Max Estimado" text="Indicador da aptidão cardiovascular. Volume máximo de oxigénio consumido no máximo da sua performance. Valores de corrida e ciclismo podem diferir pela ativação muscular." />
+                </div>
+
+                <div>
+                  <div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '14px', textTransform: 'capitalize'}}>{pt(tLoad)}</div>
+                  <div style={{color: '#8b949e', fontSize: '11px'}}>Carga</div>
+                </div>
+
+                <div onMouseEnter={() => setHoverInfo('hrv')} onMouseLeave={() => setHoverInfo(null)}>
+                  <div style={{color: '#DDE6F5', fontWeight: 600, fontSize: '14px', textTransform: 'capitalize', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer'}}>
+                    {pt(tHrvStatus)} <Info size={12} color="#5C738F" />
+                  </div>
+                  <div style={{color: '#8b949e', fontSize: '11px'}}>Estado VFC</div>
+                  <Tooltip visible={hoverInfo === 'hrv'} title="Estado da VFC (HRV Status)" text="Média de 7 dias durante o sono. Mede as alterações de tempo entre batimentos sucessivos e sinaliza a resiliência do seu sistema nervoso autónomo (equilíbrio esforço/recuperação)." />
+                </div>
               </div>
             </div>
 
@@ -321,13 +388,13 @@ export default function ActivitiesPanel() {
               <div style={{ display: 'flex', height: '10px', borderRadius: '5px', overflow: 'hidden' }}>
                 <div style={{ flex: 1, background: '#FF3A5C' }}></div>
                 <div style={{ flex: 2, background: '#F59E0B', borderLeft: '2px solid #1c1c1e', borderRight: '2px solid #1c1c1e' }}></div>
-                <div style={{ flex: 5, background: '#FF6230' }}></div>
-                <div style={{ flex: 2, background: '#00D47E', borderLeft: '2px solid #1c1c1e', borderRight: '2px solid #1c1c1e' }}></div>
-                <div style={{ flex: 1, background: '#00BFFF' }}></div>
+                <div style={{ flex: 5, background: '#00D47E' }}></div>
+                <div style={{ flex: 2, background: '#FF6230', borderLeft: '2px solid #1c1c1e', borderRight: '2px solid #1c1c1e' }}></div>
+                <div style={{ flex: 1, background: '#FF3A5C' }}></div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', color: '#8b949e', fontSize: '10px', marginTop: '6px' }}>
                 <span>Últimas 4s</span>
-                <span>Hoje</span>
+                <span>Túnel Ideal</span>
               </div>
             </div>
           </div>
