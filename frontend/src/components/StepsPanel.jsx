@@ -52,7 +52,13 @@ export default function StepsPanel() {
     }))
   ).slice(-48); // last 48 datapoints
 
-  const todayEntry = stepsData.find(d => d.calendarDate === today) || stepsData[stepsData.length - 1];
+  const todayEntry = stepsData.find(d => {
+    if (!d.calendarDate) return false;
+    const dateStr = typeof d.calendarDate === 'string'
+      ? d.calendarDate.split('T')[0]  // Remove componente de tempo se existir
+      : format(new Date(d.calendarDate), "yyyy-MM-dd");
+    return dateStr === today;
+  }) || stepsData[stepsData.length - 1];
   const todaySteps = todayEntry?.totalSteps || todayStats?.totalSteps || 0;
   const todayCal = todayStats?.totalKilocalories || todayEntry?.totalKilocalories || 0;
   const activeCal = todayStats?.activeKilocalories || 0;

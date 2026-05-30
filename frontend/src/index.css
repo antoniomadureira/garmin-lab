@@ -6,6 +6,7 @@ html, body, #root {
   color: #DDE6F5;
   font-family: 'Outfit', sans-serif;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
 }
 
 ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -20,4 +21,103 @@ input { font-family: inherit; }
   font-family: 'Barlow Condensed', sans-serif;
   font-weight: 700;
   letter-spacing: -0.01em;
+}
+
+/* ═══════════════════════════════════════════
+   SISTEMA RESPONSIVO — GARMIN DASHBOARD
+   ═══════════════════════════════════════════ */
+
+/* ── Variáveis responsivas ── */
+:root {
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 24px;
+  --space-3xl: 32px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+}
+
+/* ── Grids responsivos ── */
+.r-grid-1 { display: grid; grid-template-columns: 1fr; gap: var(--space-lg); }
+.r-grid-2 { display: grid; grid-template-columns: 1fr; gap: var(--space-lg); }
+.r-grid-3 { display: grid; grid-template-columns: 1fr; gap: var(--space-lg); }
+.r-grid-4 { display: grid; grid-template-columns: 1fr; gap: var(--space-lg); }
+
+/* ── Flex wrap utilitário ── */
+.r-flex-wrap { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.r-flex-col { display: flex; flex-direction: column; }
+.r-flex-row { display: flex; flex-direction: row; align-items: center; }
+
+/* ── Fontes responsivas ── */
+.r-text-hero { font-size: clamp(28px, 5vw, 48px); font-weight: 800; }
+.r-text-title { font-size: clamp(20px, 3vw, 32px); font-weight: 700; }
+.r-text-subtitle { font-size: clamp(16px, 2.5vw, 22px); font-weight: 700; }
+.r-text-body { font-size: clamp(12px, 1.5vw, 14px); }
+.r-text-small { font-size: clamp(10px, 1.2vw, 12px); }
+
+/* ── Cards responsivos ── */
+.r-card {
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+}
+
+/* ── Gráficos responsivos ── */
+.r-chart-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.r-chart-container::-webkit-scrollbar { height: 3px; }
+.r-chart-container::-webkit-scrollbar-thumb { background: #1C2D47; }
+
+/* ── Input data responsivo ── */
+.r-date-input {
+  background: #1C2D47;
+  border: none;
+  color: #DDE6F5;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  outline: none;
+  color-scheme: dark;
+  cursor: pointer;
+}
+
+/* ═══════════════════════════════════════════
+   MEDIA QUERIES
+   ═══════════════════════════════════════════ */
+
+/* Tablet (>= 640px) */
+@media (min-width: 640px) {
+  .r-grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .r-grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .r-grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .r-card { padding: var(--space-xl); }
+}
+
+/* Desktop (>= 768px) */
+@media (min-width: 768px) {
+  .r-grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .r-grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .r-card { padding: var(--space-2xl); }
+}
+
+/* Large Desktop (>= 1024px) */
+@media (min-width: 1024px) {
+  .r-grid-focus { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* ═══════════════════════════════════════════
+   ANIMAÇÕES
+   ═══════════════════════════════════════════ */
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.animate-spin {
+  animation: spin 1s linear infinite;
 }

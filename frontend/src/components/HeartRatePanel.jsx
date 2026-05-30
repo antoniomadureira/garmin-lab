@@ -53,7 +53,11 @@ export default function HeartRatePanel() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+      <style>{`
+        .hr-stats-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+        @media (min-width: 480px) { .hr-stats-grid { grid-template-columns: repeat(3, 1fr); } }
+      `}</style>
+      <div className="hr-stats-grid">
         <StatCard icon={<Heart size={15} />} label="FC Repouso" value={restingHR} unit="bpm" color={C.heart} sub="Hoje" />
         <StatCard icon={<TrendingUp size={15} />} label="FC Máxima" value={maxHR} unit="bpm" color={C.run} sub="Esta semana" />
         <StatCard icon={<Zap size={15} />} label="FC Mínima" value={minHR} unit="bpm" color={C.accent} sub="Hoje" />

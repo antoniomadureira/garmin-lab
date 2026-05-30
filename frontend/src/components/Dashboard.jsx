@@ -50,7 +50,7 @@ export default function Dashboard({ displayName, onLogout }) {
         .main-content { flex: 1; padding: 16px; max-width: 1140px; width: 100%; margin: 0 auto; }
         .nav-bar { background: ${C.bg1}; border-top: 1px solid ${C.border}; position: fixed; bottom: 0; left: 0; right: 0; z-index: 999; display: flex; justify-content: space-around; padding: 12px 8px calc(12px + env(safe-area-inset-bottom)) 8px; box-shadow: 0 -4px 20px rgba(0,0,0,0.4); }
         .nav-btn { background: transparent; border: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 10px; font-weight: 600; flex: 1; transition: all 0.2s; }
-        .top-header { background: ${C.bg1}; border-bottom: 1px solid ${C.border}; padding: 12px 16px; display: flex; alignItems: center; gap: 12px; position: sticky; top: 0; z-index: 100; }
+        .top-header { background: ${C.bg1}; border-bottom: 1px solid ${C.border}; padding: 12px 16px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 100; }
         @media (min-width: 768px) {
           .app-container { padding-bottom: 0; }
           .main-content { padding: 28px; }

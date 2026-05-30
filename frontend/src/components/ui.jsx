@@ -9,33 +9,33 @@ export const C = {
 export const StatCard = ({ icon, label, value, unit, color, sub }) => (
   <div style={{
     background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 16,
-    padding: "20px 22px", display: "flex", flexDirection: "column", gap: 8,
-    transition: "border-color 0.2s",
+    padding: "16px 18px", display: "flex", flexDirection: "column", gap: 6,
+    transition: "border-color 0.2s", minWidth: 0,
   }}
     onMouseEnter={e => e.currentTarget.style.borderColor = color}
     onMouseLeave={e => e.currentTarget.style.borderColor = C.border}
   >
-    <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.muted, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-      <span style={{ color }}>{icon}</span>
-      {label}
+    <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.muted, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+      <span style={{ color, flexShrink: 0 }}>{icon}</span>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
     </div>
-    <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-      <span className="stat-num" style={{ fontSize: 32, color, lineHeight: 1 }}>{value}</span>
-      {unit && <span style={{ color: C.muted, fontSize: 13 }}>{unit}</span>}
+    <div style={{ display: "flex", alignItems: "baseline", gap: 4, minWidth: 0 }}>
+      <span className="stat-num" style={{ fontSize: 'clamp(22px, 3.5vw, 32px)', color, lineHeight: 1 }}>{value}</span>
+      {unit && <span style={{ color: C.muted, fontSize: 12 }}>{unit}</span>}
     </div>
-    {sub && <div style={{ color: C.muted, fontSize: 12 }}>{sub}</div>}
+    {sub && <div style={{ color: C.muted, fontSize: 11 }}>{sub}</div>}
   </div>
 );
 
 export const Card = ({ title, children, style = {} }) => (
   <div style={{
     background: C.bg2, border: `1px solid ${C.border}`,
-    borderRadius: 16, padding: "20px 24px", ...style,
+    borderRadius: 16, padding: "16px 18px", ...style,
   }}>
     {title && (
       <div style={{
-        color: C.muted, fontSize: 12, textTransform: "uppercase",
-        letterSpacing: "0.07em", marginBottom: 18, fontWeight: 500,
+        color: C.muted, fontSize: 11, textTransform: "uppercase",
+        letterSpacing: "0.07em", marginBottom: 14, fontWeight: 500,
       }}>
         {title}
       </div>

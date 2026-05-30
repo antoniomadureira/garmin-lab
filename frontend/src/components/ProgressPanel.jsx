@@ -129,11 +129,13 @@ export default function ProgressPanel() {
 
   if (loading && activities.length === 0) return <div style={{ color: '#5C738F' }}>A processar a tua curva de evolução...</div>;
 
-  const width = 800;
-  const height = 300;
-  const paddingX = 40;
-  const paddingY = 40;
-  
+  /* ── Dimensões responsivas do SVG ── */
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  const width = isMobile ? 600 : 800;
+  const height = isMobile ? 240 : 300;
+  const paddingX = isMobile ? 30 : 40;
+  const paddingY = isMobile ? 30 : 40;
+
   const pointsString = chartData.map((d, i) => {
     const x = paddingX + (i * ((width - paddingX * 2) / Math.max(chartData.length - 1, 1)));
     const y = height - paddingY - ((d[activeMetric] / maxVal) * (height - paddingY * 2));
@@ -152,40 +154,55 @@ export default function ProgressPanel() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '100%', margin: '0 auto' }}>
-      
-      <div style={{ background: '#0B1221', padding: '32px', borderRadius: '16px', border: '1px solid #1C2D47' }}>
-        
+
+      <style>{`
+        @media (max-width: 767px) {
+          .progress-card { padding: 20px 16px !important; border-radius: 12px !important; }
+          .progress-metric-btn { padding: 6px 12px !important; font-size: 13px !important; }
+          .progress-value { font-size: 32px !important; }
+          .progress-svg-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          .progress-svg-wrapper::-webkit-scrollbar { height: 3px; }
+          .progress-svg-wrapper::-webkit-scrollbar-thumb { background: #1C2D47; border-radius: 99px; }
+        }
+        @media (min-width: 768px) {
+          .progress-card { padding: 32px !important; }
+          .progress-value { font-size: 48px !important; }
+        }
+      `}</style>
+
+      <div className="progress-card" style={{ background: '#0B1221', borderRadius: '16px', border: '1px solid #1C2D47', transition: 'padding 0.2s' }}>
+
         <div style={{ display: 'flex', gap: '12px', marginBottom: '32px', flexWrap: 'wrap' }}>
-          <button onClick={() => setActiveMetric('distance')} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', color: activeMetric === 'distance' ? '#FF6230' : '#DDE6F5', border: `1px solid ${activeMetric === 'distance' ? '#FF6230' : '#1C2D47'}`, padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontSize: '14px', fontWeight: 500, transition: '0.2s' }}>
+          <button className="progress-metric-btn" onClick={() => setActiveMetric('distance')} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', color: activeMetric === 'distance' ? '#FF6230' : '#DDE6F5', border: `1px solid ${activeMetric === 'distance' ? '#FF6230' : '#1C2D47'}`, padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontSize: '14px', fontWeight: 500, transition: '0.2s' }}>
             <Activity size={16} /> Distância
           </button>
-          <button onClick={() => setActiveMetric('duration')} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', color: activeMetric === 'duration' ? '#00BFFF' : '#DDE6F5', border: `1px solid ${activeMetric === 'duration' ? '#00BFFF' : '#1C2D47'}`, padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontSize: '14px', fontWeight: 500, transition: '0.2s' }}>
+          <button className="progress-metric-btn" onClick={() => setActiveMetric('duration')} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', color: activeMetric === 'duration' ? '#00BFFF' : '#DDE6F5', border: `1px solid ${activeMetric === 'duration' ? '#00BFFF' : '#1C2D47'}`, padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontSize: '14px', fontWeight: 500, transition: '0.2s' }}>
             <Clock size={16} /> Tempo
           </button>
-          <button onClick={() => setActiveMetric('calories')} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', color: activeMetric === 'calories' ? '#FBBF24' : '#DDE6F5', border: `1px solid ${activeMetric === 'calories' ? '#FBBF24' : '#1C2D47'}`, padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontSize: '14px', fontWeight: 500, transition: '0.2s' }}>
+          <button className="progress-metric-btn" onClick={() => setActiveMetric('calories')} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'transparent', color: activeMetric === 'calories' ? '#FBBF24' : '#DDE6F5', border: `1px solid ${activeMetric === 'calories' ? '#FBBF24' : '#1C2D47'}`, padding: '8px 16px', borderRadius: '20px', cursor: 'pointer', fontSize: '14px', fontWeight: 500, transition: '0.2s' }}>
             <Flame size={16} /> Calorias
           </button>
         </div>
 
         <div style={{ marginBottom: '24px' }}>
           <h2 style={{ color: '#DDE6F5', fontSize: '16px', margin: '0 0 4px 0', fontWeight: 600 }}>{title}</h2>
-          <div style={{ fontSize: '48px', fontWeight: 800, color: '#DDE6F5', letterSpacing: '-1px' }}>
+          <div className="progress-value" style={{ fontSize: '48px', fontWeight: 800, color: '#DDE6F5', letterSpacing: '-1px', transition: 'font-size 0.2s' }}>
             {val} <span style={{ fontSize: '18px', color: '#5C738F', fontWeight: 600 }}>{unit}</span>
           </div>
         </div>
 
-        <div style={{ position: 'relative', width: '100%', marginTop: '40px' }}>
-          <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', minWidth: '600px', display: 'block', overflow: 'visible' }}>
-            
+        <div className="progress-svg-wrapper" style={{ position: 'relative', width: '100%', marginTop: '40px' }}>
+          <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', display: 'block', overflow: 'visible', minWidth: '320px' }} preserveAspectRatio="xMidYMid meet">
+
             <line x1={0} y1={paddingY} x2={width} y2={paddingY} stroke="#1C2D47" strokeWidth="1" />
-            <text x={width - 40} y={paddingY - 8} fill="#5C738F" fontSize="12">{Math.round(maxVal)} {unit}</text>
-            
+            <text x={width - 40} y={paddingY - 8} fill="#5C738F" fontSize={isMobile ? "10" : "12"}>{Math.round(maxVal)} {unit}</text>
+
             <line x1={0} y1={height / 2} x2={width} y2={height / 2} stroke="#1C2D47" strokeWidth="1" />
-            <text x={width - 40} y={(height / 2) - 8} fill="#5C738F" fontSize="12">{Math.round(maxVal / 2)} {unit}</text>
+            <text x={width - 40} y={(height / 2) - 8} fill="#5C738F" fontSize={isMobile ? "10" : "12"}>{Math.round(maxVal / 2)} {unit}</text>
 
             <line x1={0} y1={height - paddingY} x2={width} y2={height - paddingY} stroke="#1C2D47" strokeWidth="1" />
-            <text x={width - 40} y={height - paddingY - 8} fill="#5C738F" fontSize="12">0 {unit}</text>
-            
+            <text x={width - 40} y={height - paddingY - 8} fill="#5C738F" fontSize={isMobile ? "10" : "12"}>0 {unit}</text>
+
             <polygon points={polygonPoints} fill="url(#grad)" opacity="0.3" />
             <defs>
               <linearGradient id="grad" x1="0" x2="0" y1="0" y2="1">
@@ -195,15 +212,15 @@ export default function ProgressPanel() {
             </defs>
 
             {hoveredPoint && (
-              <line 
-                x1={hoveredPoint.x} y1={paddingY} 
-                x2={hoveredPoint.x} y2={height - paddingY} 
-                stroke="#DDE6F5" strokeWidth="1" strokeDasharray="4" opacity="0.6" 
+              <line
+                x1={hoveredPoint.x} y1={paddingY}
+                x2={hoveredPoint.x} y2={height - paddingY}
+                stroke="#DDE6F5" strokeWidth="1" strokeDasharray="4" opacity="0.6"
               />
             )}
 
-            <polyline points={pointsString} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-            
+            <polyline points={pointsString} fill="none" stroke={color} strokeWidth={isMobile ? "2.5" : "3"} strokeLinecap="round" strokeLinejoin="round" />
+
             {chartData.map((d, i) => {
               const x = paddingX + (i * ((width - paddingX * 2) / Math.max(chartData.length - 1, 1)));
               const y = height - paddingY - ((d[activeMetric] / maxVal) * (height - paddingY * 2));
@@ -211,11 +228,11 @@ export default function ProgressPanel() {
 
               return (
                 <g key={`point-${i}`}>
-                  <circle cx={x} cy={y} r={hoveredPoint && hoveredPoint.index === i ? "6" : "4"} fill="#0B1221" stroke={color} strokeWidth={hoveredPoint && hoveredPoint.index === i ? "3" : "2"} style={{ transition: 'r 0.2s' }} />
-                  <text x={x} y={height - 10} fill={hoveredPoint && hoveredPoint.index === i ? "#DDE6F5" : "#5C738F"} fontSize="11" textAnchor="middle" style={{ transition: 'fill 0.2s' }}>{d.label}</text>
-                  
-                  <rect 
-                    x={x - (stepX / 2)} y={paddingY} width={stepX} height={height - paddingY * 2} 
+                  <circle cx={x} cy={y} r={hoveredPoint && hoveredPoint.index === i ? (isMobile ? "5" : "6") : (isMobile ? "3.5" : "4")} fill="#0B1221" stroke={color} strokeWidth={hoveredPoint && hoveredPoint.index === i ? (isMobile ? "2.5" : "3") : (isMobile ? "1.5" : "2")} style={{ transition: 'r 0.2s' }} />
+                  <text x={x} y={height - 10} fill={hoveredPoint && hoveredPoint.index === i ? "#DDE6F5" : "#5C738F"} fontSize={isMobile ? "9" : "11"} textAnchor="middle" style={{ transition: 'fill 0.2s' }}>{d.label}</text>
+
+                  <rect
+                    x={x - (stepX / 2)} y={paddingY} width={stepX} height={height - paddingY * 2}
                     fill="transparent" style={{ cursor: 'crosshair' }}
                     onMouseEnter={() => setHoveredPoint({ x, y, data: d, index: i })}
                     onMouseLeave={() => setHoveredPoint(null)}
@@ -252,14 +269,14 @@ export default function ProgressPanel() {
 
         <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '32px', borderTop: '1px solid #1C2D47', paddingTop: '24px', flexWrap: 'wrap' }}>
           {['7D', '1M', '3M', '6M', 'YTD', '1Y'].map(p => (
-            <button 
-              key={p} 
+            <button
+              key={p}
               onClick={() => setPeriod(p)}
-              style={{ 
-                background: period === p ? color : 'transparent', 
-                color: period === p ? '#000' : color, 
-                border: 'none', borderRadius: '20px', padding: '8px 16px', 
-                cursor: 'pointer', fontSize: '13px', fontWeight: 700, transition: '0.2s'
+              style={{
+                background: period === p ? color : 'transparent',
+                color: period === p ? '#000' : color,
+                border: 'none', borderRadius: '20px', padding: isMobile ? '6px 12px' : '8px 16px',
+                cursor: 'pointer', fontSize: isMobile ? '11px' : '13px', fontWeight: 700, transition: '0.2s'
               }}
             >
               {p}

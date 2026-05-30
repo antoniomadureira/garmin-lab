@@ -44,7 +44,13 @@ export default function Login({ onLogin }) {
         backgroundSize: "48px 48px", pointerEvents: "none",
       }} />
 
-      <div style={{
+      <style>{`
+        @media (max-width: 480px) {
+          .login-box { padding: 32px 20px !important; margin: 0 12px !important; border-radius: 16px !important; }
+          .login-logo-text { font-size: 18px !important; }
+        }
+      `}</style>
+      <div className="login-box" style={{
         background: C.bg1, border: `1px solid ${C.border}`, borderRadius: 20,
         padding: "48px 40px", width: "100%", maxWidth: 420, position: "relative", zIndex: 1,
         boxShadow: "0 40px 80px rgba(0,0,0,0.6)",
@@ -59,7 +65,7 @@ export default function Login({ onLogin }) {
             <Watch size={24} color={C.bg0} />
           </div>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em" }}>Garmin Dashboard</div>
+            <div className="login-logo-text" style={{ fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em" }}>Garmin Dashboard</div>
             <div style={{ color: C.muted, fontSize: 13 }}>Liga-te à tua conta</div>
           </div>
         </div>

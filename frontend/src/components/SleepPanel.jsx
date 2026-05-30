@@ -49,8 +49,17 @@ export default function SleepPanel() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <style>{`
+        .sleep-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .sleep-distribution { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        @media (min-width: 768px) {
+          .sleep-stats-grid { grid-template-columns: repeat(4, 1fr); }
+          .sleep-distribution { grid-template-columns: repeat(4, 1fr); }
+        }
+      `}</style>
+
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
+      <div className="sleep-stats-grid">
         <StatCard icon={<Moon size={15} />} label="Score Sono" value={lastNight.sleepScore ?? "—"} unit="/100" color={C.sleep} sub="Ontem" />
         <StatCard icon={<Clock size={15} />} label="Duração Total" value={secsToHM((lastNight.deepSleepSeconds || 0) + (lastNight.lightSleepSeconds || 0) + (lastNight.remSleepSeconds || 0))} unit="" color={C.text} sub="Ontem" />
         <StatCard icon={<Zap size={15} />} label="Sono Profundo" value={secsToHM(lastNight.deepSleepSeconds)} unit="" color="#5BE8FF" sub="Ontem" />
@@ -104,7 +113,7 @@ export default function SleepPanel() {
       {/* Stages breakdown for last night */}
       {totalMinLast > 0 && (
         <Card title="Distribuição — Ontem">
-          <div style={{ display: "flex", gap: 14 }}>
+          <div className="sleep-distribution">
             {[
               { label: "Profundo", secs: lastNight.deepSleepSeconds, color: STAGE_COLORS.deep, pct: Math.round((lastNight.deepSleepSeconds / (totalMinLast * 60)) * 100) },
               { label: "REM", secs: lastNight.remSleepSeconds, color: STAGE_COLORS.rem, pct: Math.round((lastNight.remSleepSeconds / (totalMinLast * 60)) * 100) },
@@ -112,12 +121,12 @@ export default function SleepPanel() {
               { label: "Acordado", secs: lastNight.awakeSleepSeconds, color: STAGE_COLORS.awake, pct: Math.round((lastNight.awakeSleepSeconds / (totalMinLast * 60)) * 100) },
             ].map(s => (
               <div key={s.label} style={{
-                flex: 1, background: C.bg3, borderRadius: 12, padding: "16px",
+                background: C.bg3, borderRadius: 12, padding: "14px 10px",
                 border: `1px solid ${C.border}`, textAlign: "center",
               }}>
-                <div className="stat-num" style={{ fontSize: 26, color: s.color }}>{secsToHM(s.secs)}</div>
-                <div style={{ color: C.muted, fontSize: 11, marginTop: 4 }}>{s.label}</div>
-                <div style={{ color: s.color, fontSize: 12, fontWeight: 600, marginTop: 2 }}>{s.pct}%</div>
+                <div className="stat-num" style={{ fontSize: 22, color: s.color }}>{secsToHM(s.secs)}</div>
+                <div style={{ color: C.muted, fontSize: 10, marginTop: 4 }}>{s.label}</div>
+                <div style={{ color: s.color, fontSize: 11, fontWeight: 600, marginTop: 2 }}>{s.pct}%</div>
               </div>
             ))}
           </div>

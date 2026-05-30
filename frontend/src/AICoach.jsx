@@ -82,10 +82,16 @@ export default function AICoach({ briefing, setBriefing }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <div style={{ background: '#0B1221', padding: '24px', borderRadius: '12px', border: '1px solid #1C2D47' }}>
+      <style>{`
+        @media (max-width: 480px) {
+          .ai-card { padding: 16px !important; }
+          .ai-title { font-size: 16px !important; }
+        }
+      `}</style>
+      <div className="ai-card" style={{ background: '#0B1221', padding: '24px', borderRadius: '12px', border: '1px solid #1C2D47' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
           <Brain size={24} color="#1f6feb" />
-          <h2 style={{ color: '#DDE6F5', fontSize: '18px', margin: 0 }}>Briefing Diário</h2>
+          <h2 className="ai-title" style={{ color: '#DDE6F5', fontSize: '18px', margin: 0 }}>Briefing Diário</h2>
         </div>
         
         {loadingBriefing ? (
@@ -99,7 +105,7 @@ export default function AICoach({ briefing, setBriefing }) {
         )}
       </div>
 
-      <div style={{ background: '#0B1221', padding: '24px', borderRadius: '12px', border: '1px solid #1C2D47', display: 'flex', flexDirection: 'column', height: '400px' }}>
+      <div className="ai-card" style={{ background: '#0B1221', padding: '24px', borderRadius: '12px', border: '1px solid #1C2D47', display: 'flex', flexDirection: 'column', height: 'min(400px, 60vh)' }}>
         <h3 style={{ color: '#DDE6F5', fontSize: '16px', margin: '0 0 16px 0' }}>Chat de Performance</h3>
         
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '16px' }}>

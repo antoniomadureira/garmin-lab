@@ -232,8 +232,14 @@ export default function ActivitiesPanel() {
     const d = new Date(start7d);
     d.setDate(d.getDate() + i);
     const dayRuns = runs7d.filter(r => {
+      if (!r.startTimeLocal) return false;
       const rd = new Date(r.startTimeLocal);
-      return rd.getDate() === d.getDate() && rd.getMonth() === d.getMonth();
+      // Validar se a data foi parseada corretamente
+      if (isNaN(rd.getTime())) return false;
+      // Comparar ano, mês e dia para garantir correspondência exata
+      return rd.getFullYear() === d.getFullYear() &&
+             rd.getMonth() === d.getMonth() &&
+             rd.getDate() === d.getDate();
     });
     const dayDist = dayRuns.reduce((acc, r) => acc + (r.distance || 0), 0);
     chart7d.push({ label: d.toLocaleDateString('pt-PT', {weekday:'short'}).charAt(0).toUpperCase(), val: dayDist });
@@ -265,8 +271,14 @@ export default function ActivitiesPanel() {
     activities.forEach(act => {
       if (!act.startTimeLocal) return;
       const actDate = new Date(act.startTimeLocal);
-      if (actDate >= start && actDate <= end) {
-        const index = Math.floor((actDate - start) / (1000 * 60 * 60 * 24));
+      // Validar se a data foi parseada corretamente
+      if (isNaN(actDate.getTime())) return;
+      // Normalizar para comparação fiável (ignorar componente de hora)
+      const actDateNorm = new Date(actDate.getFullYear(), actDate.getMonth(), actDate.getDate());
+      const startNorm = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+      const endNorm = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+      if (actDateNorm >= startNorm && actDateNorm <= endNorm) {
+        const index = Math.floor((actDateNorm - startNorm) / (1000 * 60 * 60 * 24));
         if (localChartData[index]) {
           localChartData[index].distance += act.distance || 0;
           localChartData[index].calories += act.calories || 0;
@@ -285,9 +297,17 @@ export default function ActivitiesPanel() {
   const filteredActivities = activities.filter(act => {
     if (!act.startTimeLocal) return false;
     const actDate = new Date(act.startTimeLocal);
+    // Validar se a data foi parseada corretamente
+    if (isNaN(actDate.getTime())) return false;
     const diffMonths = (now.getFullYear() - actDate.getFullYear()) * 12 + (now.getMonth() - actDate.getMonth());
     return diffMonths < monthsLoaded;
-  }).sort((a, b) => new Date(b.startTimeLocal) - new Date(a.startTimeLocal));
+  }).sort((a, b) => {
+    const dateA = new Date(a.startTimeLocal);
+    const dateB = new Date(b.startTimeLocal);
+    // Se alguma data for inválida, manter a ordem original
+    if (isNaN(dateA.getTime()) || isNaN(dateB.getTime())) return 0;
+    return dateB - dateA;
+  });
 
   const formatDuration = (mins) => {
     if (!mins) return "-";
