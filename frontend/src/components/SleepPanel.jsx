@@ -19,7 +19,17 @@ export default function SleepPanel() {
 
   useEffect(() => {
     fetchSleepWeekly(7)
-      .then(setWeekData)
+      .then((data) => {
+        // Validação extra no momento do fetch
+        if (!Array.isArray(data)) {
+          console.warn("Aviso: fetchSleepWeekly não devolveu um array.", data);
+          setWeekData([]);
+          // Opcional: Podes definir um erro aqui se quiseres que apareça o ErrorBanner
+          // setError("Não foi possível carregar os dados de sono.");
+        } else {
+          setWeekData(data);
+        }
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
@@ -27,10 +37,13 @@ export default function SleepPanel() {
   if (loading) return <Spinner />;
   if (error) return <ErrorBanner msg={error} />;
 
-  // Last valid night
-  const lastNight = [...weekData].reverse().find(d => d.deepSleepSeconds != null) || {};
+  // Guard: Garante que temos sempre um array para evitar crashes nas operações abaixo
+  const safeWeekData = Array.isArray(weekData) ? weekData : [];
 
-  const chartData = weekData.map(d => ({
+  // Last valid night usando o safeWeekData
+  const lastNight = [...safeWeekData].reverse().find(d => d.deepSleepSeconds != null) || {};
+
+  const chartData = safeWeekData.map(d => ({
     day: d.date ? format(new Date(d.date), "EEE") : "",
     deep: Math.round((d.deepSleepSeconds || 0) / 60),
     rem: Math.round((d.remSleepSeconds || 0) / 60),
@@ -45,7 +58,7 @@ export default function SleepPanel() {
     (lastNight.remSleepSeconds || 0)
   ) / 60;
 
-  const avgScore = weekData.filter(d => d.sleepScore).reduce((s, d, _, a) => s + d.sleepScore / a.length, 0);
+  const avgScore = safeWeekData.filter(d => d.sleepScore).reduce((s, d, _, a) => s + d.sleepScore / a.length, 0);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
