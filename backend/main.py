@@ -1,331 +1,333 @@
 """
-Garmin Dashboard – Backend API
-Usa: garminconnect + FastAPI + Gemini AI
+Garmin Dashboard Backend v2.0
+Sem garminconnect. Sem OAuth. Sem rate limiting.
+Auth via cookies de browser (JWT_WEB + GARMIN-SSO-GUID).
 """
+from __future__ import annotations
+import os, time, secrets, logging
+from datetime import date, timedelta
+
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
-from datetime import date, timedelta
-import secrets
-import time
-import os
-import json
-import base64
-import re
-
-import garminconnect
 from google import genai
 
-app = FastAPI(title="Garmin Dashboard API", version="1.1.0")
+from garmin_client import GarminClient
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("main")
+
+app = FastAPI(title="Garmin Dashboard API", version="2.0.0")
+
+# ── CORS ──────────────────────────────────────────────────────────
+_cors = os.environ.get("CORS_ORIGINS", "")
+ALLOWED_ORIGINS = [o.strip() for o in _cors.split(",") if o.strip()] or [
+    "http://localhost:5173", "http://localhost:3000",
+    "http://127.0.0.1:5173",
+]
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "https://garmin-lab.vercel.app",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"],
 )
 
-sessions: dict[str, garminconnect.Garmin] = {}
-api_cache: dict[str, dict] = {}
-CACHE_TTL = 3600  
+# ── Estado ────────────────────────────────────────────────────────
+sessions:  dict[str, GarminClient] = {}
+api_cache: dict[str, dict]         = {}
+CACHE_TTL = 3600
 
-def fetch_with_cache(cache_key: str, fetch_func):
-    now = time.time()
-    if cache_key in api_cache and api_cache[cache_key]["expires"] > now:
-        return api_cache[cache_key]["data"]
-    data = fetch_func()
-    api_cache[cache_key] = {"data": data, "expires": now + CACHE_TTL}
-    return data
+def _cache_get(k: str):
+    e = api_cache.get(k)
+    return e["data"] if e and e["expires"] > time.time() else None
 
+def _cache_set(k: str, v):
+    api_cache[k] = {"data": v, "expires": time.time() + CACHE_TTL}
+    return v
+
+# ── Modelos ───────────────────────────────────────────────────────
 class LoginRequest(BaseModel):
     email: str
-    password: str
+    password: str   # não usado; mantido para compatibilidade com o frontend
 
 class ChatRequest(BaseModel):
     message: str
 
-def get_api(request: Request) -> garminconnect.Garmin:
-    auth = request.headers.get("Authorization", "")
-    token = auth.replace("Bearer ", "").strip()
-    if not token or token not in sessions:
+# ── Auth ──────────────────────────────────────────────────────────
+def get_client(request: Request) -> GarminClient:
+    tok = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not tok or tok not in sessions:
         raise HTTPException(status_code=401, detail="Não autenticado.")
-    return sessions[token]
+    return sessions[tok]
 
+# ── Login ─────────────────────────────────────────────────────────
 @app.post("/login")
-def login(req: LoginRequest):
+async def login(req: LoginRequest):
+    jwt = os.environ.get("GARMIN_JWT_WEB", "")
+    sso = os.environ.get("GARMIN_SSO_GUID", "")
+
+    if not sso:
+        raise HTTPException(status_code=503, detail=(
+            "GARMIN_SSO_GUID não configurado no Render. "
+            "Segue as instruções em README para configurar os cookies."
+        ))
+
     try:
-        token_store = "/tmp/garmin_tokens"
-        env_token = os.getenv("GARMIN_SESSION_TOKEN")
-        
-        if env_token:
-            env_token = re.sub(r'[^a-zA-Z0-9+/=]', '', env_token)
-            padding = len(env_token) % 4
-            if padding > 0:
-                env_token += "=" * (4 - padding)
-
-            os.makedirs(token_store, exist_ok=True)
-            tokens_data = json.loads(base64.b64decode(env_token).decode('utf-8'))
-            for filename, content in tokens_data.items():
-                with open(os.path.join(token_store, filename), "w") as f:
-                    f.write(content)
-                    
-        api = garminconnect.Garmin(req.email, req.password)
-        
-        if env_token and os.path.exists(token_store):
-            api.login(token_store)
-        else:
-            api.login() 
-            
-        token = secrets.token_urlsafe(32)
-        sessions[token] = api
-
-        full_name = ""
-        try:
-            profile = api.get_full_name()
-            full_name = profile or ""
-        except Exception:
-            pass
-
-        return {"token": token, "displayName": full_name}
-
-    except garminconnect.GarminConnectAuthenticationError:
-        raise HTTPException(status_code=401, detail="Credenciais inválidas.")
+        client = GarminClient()
+        display = await run_in_threadpool(client.get_full_name)
+        tok = secrets.token_urlsafe(32)
+        sessions[tok] = client
+        log.info("Login OK — %s", display or req.email)
+        return {"token": tok, "displayName": display or req.email}
     except Exception as e:
+        log.error("Login falhou: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/logout")
 async def logout(request: Request):
-    auth = request.headers.get("Authorization", "")
-    token = auth.replace("Bearer ", "").strip()
-    sessions.pop(token, None)
+    tok = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    sessions.pop(tok, None)
     return {"ok": True}
 
-# ── EM FOCO (Readiness & Status) ──────────────────────────────────
+# ── Training Focus ────────────────────────────────────────────────
 @app.get("/training-focus")
-def get_training_focus(api: garminconnect.Garmin = Depends(get_api)):
-    try:
-        today = date.today().strftime("%Y-%m-%d")
-
-        def fetch_readiness():
-            try:
-                readiness_data = api.get_training_readiness(today)
-                # Normalização para prontidão
-                if readiness_data and "dailyReadinessDTO" in readiness_data:
-                    return readiness_data["dailyReadinessDTO"]
-                elif readiness_data and "latestDailyReadinessDTO" in readiness_data:
-                    return readiness_data["latestDailyReadinessDTO"]
-                return readiness_data
-            except Exception as e:
-                print(f"Erro ao obter prontidão de treino: {e}")
-                return None
-
-        def fetch_status():
-            try:
-                status_data = api.get_training_status(today)
-                # Normalização para estado de treino (se necessário, pode ser mais simples)
-                return status_data
-            except Exception as e:
-                print(f"Erro ao obter estado de treino: {e}")
-                return None
-
+async def training_focus(c: GarminClient = Depends(get_client)):
+    d = date.today().strftime("%Y-%m-%d")
+    if v := _cache_get(f"focus_{d}"): return v
+    def _f():
         return {
-            "readiness": fetch_with_cache(f"readiness_{id(api)}_{today}", fetch_readiness),
-            "status": fetch_with_cache(f"status_{id(api)}_{today}", fetch_status)
+            "readiness": c.get_training_readiness(d),
+            "status":    c.get_training_status(d),
+            "hrv":       c.get_hrv_data(d),
         }
+    try:
+        return _cache_set(f"focus_{d}", await run_in_threadpool(_f))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro interno do servidor: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# ── IA Briefing & Chat ────────────────────────────────────────────
+# ── Briefing IA ───────────────────────────────────────────────────
 @app.get("/briefing")
-def get_ai_briefing(api: garminconnect.Garmin = Depends(get_api)):
+async def briefing(c: GarminClient = Depends(get_client)):
+    d = date.today().strftime("%Y-%m-%d")
+    if v := _cache_get(f"briefing_{d}"): return v
+
+    def _fetch():
+        return {
+            "sleep":  c.get_sleep_data(d),
+            "stats":  c.get_stats(d),
+            "bb":     c.get_body_battery(d, d),
+            "ready":  c.get_training_readiness(d),
+            "status": c.get_training_status(d),
+            "hrv":    c.get_hrv_data(d),
+        }
+
     try:
-        today = date.today().strftime("%Y-%m-%d")
-        try:
-            sleep_data = api.get_sleep_data(today) or {}
-            stats = api.get_stats(today) or {}
-            body_battery = api.get_body_battery(today, today) or []
-        except Exception as api_err:
-            return {"briefing": f"Erro a obter dados da Garmin. Detalhe: {str(api_err)}"}
-            
-        sleep_score = sleep_data.get("dailySleepDTO", {}).get("sleepScores", {}).get("overall", {}).get("value", "N/A")
-        stress = stats.get("averageStressLevel", "N/A")
-        bb_highest = body_battery[0].get("bodyBatteryHighestValue", "N/A") if len(body_battery) > 0 else "N/A"
-
-        prompt = f"""
-        Atua como fisiologista de desporto. O atleta tem um volume de treino de 60km/semana (preparação Maratona de Madrid), complementado com força corporal e percursos do Caminho de Santiago.
-        Dados extraídos hoje ({today}): Sono: {sleep_score}/100 | Stress: {stress}/100 | Body Battery Pico: {bb_highest}/100.
-        Escreve um briefing analítico nestes 3 pontos: 1. EVIDÊNCIA BIOMÉTRICA, 2. ESTADO DO SNC, 3. PRESCRIÇÃO FUNDAMENTADA.
-        """
-
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key: return {"briefing": "🔴 Erro: Chave GEMINI_API_KEY em falta."}
-            
-        try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-            return {"briefing": response.text}
-        except Exception as err:
-            return {"briefing": f"🔴 Erro de IA: {str(err)}"}
+        g = await run_in_threadpool(_fetch)
     except Exception as e:
-        return {"briefing": f"Erro de servidor: {str(e)}"}
+        return {"briefing": f"Erro Garmin: {e}"}
 
+    sl  = g["sleep"].get("dailySleepDTO", {})
+    scr = sl.get("sleepScores", {}).get("overall", {}).get("value", "N/D")
+    tot = round(((sl.get("deepSleepSeconds") or 0) +
+                 (sl.get("remSleepSeconds")  or 0) +
+                 (sl.get("lightSleepSeconds")or 0)) / 3600, 1)
+    st    = g["stats"]
+    rdy   = (g["ready"].get("dailyReadinessDTO") or g["ready"])
+    hrv_s = (g["hrv"].get("hrvSummary") or {})
+
+    prompt = f"""
+Atua como fisiologista de desporto de alto rendimento.
+Dados biométricos do atleta em {d}:
+- Sono: {scr}/100 · {tot}h total
+- HRV ontem: {hrv_s.get('lastNight','N/D')} · Estado VFC: {rdy.get('hrvStatus','N/D')}
+- Readiness: {rdy.get('readinessValue','N/D')}
+- Stress médio: {st.get('averageStressLevel','N/D')}/100
+- Body Battery pico: {g['bb'][0].get('bodyBatteryHighestValue','N/D') if g['bb'] else 'N/D'}
+- FC repouso: {st.get('restingHeartRate','N/D')} bpm · Passos: {st.get('totalSteps','N/D')}
+- Estado treino: {(g['status'].get('trainingStatus') or {}).get('trainingStatusPeak','N/D')}
+- VO2max: {g['status'].get('vo2MaxPreciseValue') or g['status'].get('vo2Max','N/D')}
+
+3 pontos (máx 200 palavras, sem floreados):
+1. EVIDÊNCIA BIOMÉTRICA
+2. ESTADO DO SNC
+3. PRESCRIÇÃO DO DIA (tipo · duração · intensidade específicos)
+"""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key: return {"briefing": "🔴 GEMINI_API_KEY não configurada."}
+
+    try:
+        def _ai():
+            return genai.Client(api_key=api_key).models.generate_content(
+                model="gemini-2.5-flash", contents=prompt
+            ).text
+        return _cache_set(f"briefing_{d}", {"briefing": await run_in_threadpool(_ai)})
+    except Exception as e:
+        return {"briefing": f"🔴 IA: {e}"}
+
+# ── Chat ──────────────────────────────────────────────────────────
 @app.post("/chat")
-def ask_pt(req: ChatRequest, api: garminconnect.Garmin = Depends(get_api)):
-    try:
-        today = date.today().strftime("%Y-%m-%d")
-        stats = api.get_stats(today) or {}
-        stress = stats.get("averageStressLevel", "Desconhecido")
-        prompt = f"És o treinador pessoal do Tomás. Ele corre para a Maratona de Madrid, faz reforço com peso corporal e gere o Caminho de Santiago. Stress médio hoje: {stress}/100. Responde à pergunta: {req.message}"
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key: return {"reply": "🔴 Erro: GEMINI_API_KEY em falta."}
+async def chat(req: ChatRequest, c: GarminClient = Depends(get_client)):
+    d = date.today().strftime("%Y-%m-%d")
+    stats = _cache_get(f"stats_{d}") or {}
+    if not stats:
         try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-            return {"reply": response.text}
-        except Exception as err:
-            return {"reply": f"🔴 Erro de IA: {str(err)}"}
-    except Exception as e:
-        return {"reply": f"Erro interno: {str(e)}"}
-
-# ── Atividades & Biometria ────────────────────────────────────────
-@app.get("/activities")
-def get_activities(limit: int = 20, api: garminconnect.Garmin = Depends(get_api)):
+            stats = await run_in_threadpool(lambda: c.get_stats(d))
+            _cache_set(f"stats_{d}", stats)
+        except Exception:
+            pass
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key: return {"reply": "🔴 GEMINI_API_KEY não configurada."}
+    prompt = (
+        f"Treinador de corrida especializado em maratona. "
+        f"Dados hoje: stress {stats.get('averageStressLevel','?')}/100, "
+        f"passos {stats.get('totalSteps','?')}. "
+        f"Responde concisamente: {req.message}"
+    )
     try:
-        cache_key = f"activities_{id(api)}_{limit}"
-        data = fetch_with_cache(cache_key, lambda: api.get_activities(0, limit))
-        result = []
-        for a in data:
-            result.append({
-                "activityId": a.get("activityId"),
-                "activityName": a.get("activityName", ""),
-                "activityType": a.get("activityType", {}).get("typeKey", "unknown"),
-                "startTimeLocal": a.get("startTimeLocal", ""),
-                "distance": round((a.get("distance") or 0) / 1000, 2),
-                "duration": round((a.get("duration") or 0) / 60, 1),
-                "calories": a.get("calories"),
-                "averageHR": a.get("averageHR"),
-            })
-        return result
+        def _ai():
+            return genai.Client(api_key=api_key).models.generate_content(
+                model="gemini-2.5-flash", contents=prompt
+            ).text
+        return {"reply": await run_in_threadpool(_ai)}
+    except Exception as e:
+        return {"reply": f"🔴 IA: {e}"}
+
+# ── Atividades ────────────────────────────────────────────────────
+@app.get("/activities")
+async def activities(limit: int = 20, c: GarminClient = Depends(get_client)):
+    if v := _cache_get(f"act_{limit}"): return v
+    try:
+        raw = await run_in_threadpool(lambda: c.get_activities(0, limit))
+        data = [{"activityId": a.get("activityId"),
+                 "activityName": a.get("activityName",""),
+                 "activityType": (a.get("activityType") or {}).get("typeKey","unknown"),
+                 "startTimeLocal": a.get("startTimeLocal",""),
+                 "distance": round((a.get("distance") or 0)/1000, 2),
+                 "duration": round((a.get("duration") or 0)/60, 1),
+                 "calories": a.get("calories"),
+                 "averageHR": a.get("averageHR")} for a in (raw or [])]
+        return _cache_set(f"act_{limit}", data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/activities/ytd")
-def get_activities_ytd(api: garminconnect.Garmin = Depends(get_api)):
+async def activities_ytd(c: GarminClient = Depends(get_client)):
+    hoje  = date.today()
+    start = date(hoje.year, 1, 1).strftime("%Y-%m-%d")
+    end   = hoje.strftime("%Y-%m-%d")
+    if v := _cache_get(f"ytd_{start}"): return v
     try:
-        hoje = date.today()
-        inicio_ano = date(hoje.year, 1, 1).strftime("%Y-%m-%d")
-        fim = hoje.strftime("%Y-%m-%d")
-        cache_key = f"activities_ytd_{id(api)}_{inicio_ano}_{fim}"
-        data = fetch_with_cache(cache_key, lambda: api.get_activities_by_date(inicio_ano, fim, ""))
-        
-        result = []
-        if data:
-            for a in data:
-                result.append({
-                    "activityId": a.get("activityId"),
-                    "activityName": a.get("activityName", ""),
-                    "activityType": a.get("activityType", {}).get("typeKey", "unknown"),
-                    "startTimeLocal": a.get("startTimeLocal", ""),
-                    "distance": round((a.get("distance") or 0) / 1000, 2),
-                    "duration": round((a.get("duration") or 0) / 60, 1),
-                    "calories": a.get("calories", 0),
-                    "averageHR": a.get("averageHR", 0),
-                })
-        return result
+        raw = await run_in_threadpool(lambda: c.get_activities_by_date(start, end))
+        data = [{"activityId": a.get("activityId"),
+                 "activityName": a.get("activityName",""),
+                 "activityType": (a.get("activityType") or {}).get("typeKey","unknown"),
+                 "startTimeLocal": a.get("startTimeLocal",""),
+                 "distance": round((a.get("distance") or 0)/1000, 2),
+                 "duration": round((a.get("duration") or 0)/60, 1),
+                 "calories": a.get("calories",0),
+                 "averageHR": a.get("averageHR",0)} for a in (raw or [])]
+        return _cache_set(f"ytd_{start}", data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ── Biometria ─────────────────────────────────────────────────────
 @app.get("/heartrate")
-def get_heartrate(date_str: str = None, api: garminconnect.Garmin = Depends(get_api)):
+async def heartrate(date_str: str = None, c: GarminClient = Depends(get_client)):
     d = date_str or date.today().strftime("%Y-%m-%d")
-    return fetch_with_cache(f"hr_{id(api)}_{d}", lambda: api.get_heart_rates(d))
+    if v := _cache_get(f"hr_{d}"): return v
+    try: return _cache_set(f"hr_{d}", await run_in_threadpool(lambda: c.get_heart_rates(d)))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/heartrate/weekly")
-def get_heartrate_weekly(days: int = 7, api: garminconnect.Garmin = Depends(get_api)):
-    cache_key = f"hr_weekly_{id(api)}_{days}_{date.today()}"
-    def fetch_weekly_hr():
-        results = []
-        today = date.today()
-        for i in range(days - 1, -1, -1):
-            d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+async def heartrate_weekly(days: int = 7, c: GarminClient = Depends(get_client)):
+    k = f"hrw_{days}_{date.today()}"
+    if v := _cache_get(k): return v
+    def _f():
+        res, today = [], date.today()
+        for i in range(days-1, -1, -1):
+            dd = (today - timedelta(days=i)).strftime("%Y-%m-%d")
             try:
-                data = api.get_heart_rates(d)
-                results.append({
-                    "date": d,
-                    "restingHR": data.get("restingHeartRate"),
-                    "maxHR": data.get("maxHeartRate"),
-                    "minHR": data.get("minHeartRate"),
-                })
+                data = c.get_heart_rates(dd)
+                res.append({"date": dd, "restingHR": data.get("restingHeartRate"), "maxHR": data.get("maxHeartRate")})
             except Exception:
-                results.append({"date": d, "restingHR": None, "maxHR": None})
-        return results
-    try:
-        return fetch_with_cache(cache_key, fetch_weekly_hr)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+                res.append({"date": dd, "restingHR": None, "maxHR": None})
+        return res
+    try: return _cache_set(k, await run_in_threadpool(_f))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/sleep")
-def get_sleep(date_str: str = None, api: garminconnect.Garmin = Depends(get_api)):
+async def sleep(date_str: str = None, c: GarminClient = Depends(get_client)):
     d = date_str or date.today().strftime("%Y-%m-%d")
-    return fetch_with_cache(f"sleep_{id(api)}_{d}", lambda: api.get_sleep_data(d))
+    if v := _cache_get(f"sl_{d}"): return v
+    try: return _cache_set(f"sl_{d}", await run_in_threadpool(lambda: c.get_sleep_data(d)))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/sleep/weekly")
-def get_sleep_weekly(days: int = 7, api: garminconnect.Garmin = Depends(get_api)):
-    cache_key = f"sleep_weekly_{id(api)}_{days}_{date.today()}"
-    def fetch_weekly_sleep():
-        results = []
-        today = date.today()
-        for i in range(days - 1, -1, -1):
-            d = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+async def sleep_weekly(days: int = 7, c: GarminClient = Depends(get_client)):
+    k = f"slw_{days}_{date.today()}"
+    if v := _cache_get(k): return v
+    def _f():
+        res, today = [], date.today()
+        for i in range(days-1, -1, -1):
+            dd = (today - timedelta(days=i)).strftime("%Y-%m-%d")
             try:
-                raw = api.get_sleep_data(d)
-                summary = raw.get("dailySleepDTO", {})
-                results.append({
-                    "date": d,
-                    "sleepScore": summary.get("sleepScores", {}).get("overall", {}).get("value"),
-                    "deepSleepSeconds": summary.get("deepSleepSeconds"),
-                    "lightSleepSeconds": summary.get("lightSleepSeconds"),
-                    "remSleepSeconds": summary.get("remSleepSeconds"),
-                    "awakeSleepSeconds": summary.get("awakeSleepSeconds"),
-                })
+                raw = c.get_sleep_data(dd)
+                s   = raw.get("dailySleepDTO", {})
+                res.append({"date": dd,
+                            "sleepScore":        s.get("sleepScores",{}).get("overall",{}).get("value"),
+                            "deepSleepSeconds":  s.get("deepSleepSeconds"),
+                            "lightSleepSeconds": s.get("lightSleepSeconds"),
+                            "remSleepSeconds":   s.get("remSleepSeconds"),
+                            "awakeSleepSeconds": s.get("awakeSleepSeconds")})
             except Exception:
-                results.append({"date": d})
-        return results
-    try:
-        return fetch_with_cache(cache_key, fetch_weekly_sleep)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+                res.append({"date": dd})
+        return res
+    try: return _cache_set(k, await run_in_threadpool(_f))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/steps")
-def get_steps(days: int = 7, api: garminconnect.Garmin = Depends(get_api)):
+async def steps(days: int = 7, c: GarminClient = Depends(get_client)):
     today = date.today()
-    start = (today - timedelta(days=days - 1)).strftime("%Y-%m-%d")
-    end = today.strftime("%Y-%m-%d")
-    return fetch_with_cache(f"steps_{id(api)}_{start}_{end}", lambda: api.get_daily_steps(start, end))
+    start = (today - timedelta(days=days-1)).strftime("%Y-%m-%d")
+    end   = today.strftime("%Y-%m-%d")
+    k     = f"steps_{start}"
+    if v := _cache_get(k): return v
+    try: return _cache_set(k, await run_in_threadpool(lambda: c.get_daily_steps(start, end)))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/stats")
-def get_stats(date_str: str = None, api: garminconnect.Garmin = Depends(get_api)):
+async def stats(date_str: str = None, c: GarminClient = Depends(get_client)):
     d = date_str or date.today().strftime("%Y-%m-%d")
-    return fetch_with_cache(f"stats_{id(api)}_{d}", lambda: api.get_stats(d))
+    if v := _cache_get(f"stats_{d}"): return v
+    try: return _cache_set(f"stats_{d}", await run_in_threadpool(lambda: c.get_stats(d)))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/body-battery")
-def get_body_battery(days: int = 7, api: garminconnect.Garmin = Depends(get_api)):
+async def body_battery(days: int = 7, c: GarminClient = Depends(get_client)):
     today = date.today()
-    start = (today - timedelta(days=days - 1)).strftime("%Y-%m-%d")
-    end = today.strftime("%Y-%m-%d")
-    return fetch_with_cache(f"bb_{id(api)}_{start}_{end}", lambda: api.get_body_battery(start, end))
+    start = (today - timedelta(days=days-1)).strftime("%Y-%m-%d")
+    end   = today.strftime("%Y-%m-%d")
+    k     = f"bb_{start}"
+    if v := _cache_get(k): return v
+    try: return _cache_set(k, await run_in_threadpool(lambda: c.get_body_battery(start, end)))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/stress")
-def get_stress(date_str: str = None, api: garminconnect.Garmin = Depends(get_api)):
+async def stress_ep(date_str: str = None, c: GarminClient = Depends(get_client)):
     d = date_str or date.today().strftime("%Y-%m-%d")
-    return fetch_with_cache(f"stress_{id(api)}_{d}", lambda: api.get_stress_data(d))
+    if v := _cache_get(f"stress_{d}"): return v
+    try: return _cache_set(f"stress_{d}", await run_in_threadpool(lambda: c.get_stress_data(d)))
+    except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
+# ── Health ────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.1.0"}
+    has_jwt = bool(os.environ.get("GARMIN_JWT_WEB"))
+    has_sso = bool(os.environ.get("GARMIN_SSO_GUID"))
+    return {
+        "status":  "ok",
+        "version": "2.0.0",
+        "auth":    "cookie-based · no OAuth · no rate limiting",
+        "garmin_jwt_configured": has_jwt,
+        "garmin_sso_configured": has_sso,
+        "sessions_active": len(sessions),
+    }
