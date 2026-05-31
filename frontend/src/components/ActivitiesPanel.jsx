@@ -178,8 +178,8 @@ export default function ActivitiesPanel() {
   // --- EXTRAÇÃO VALIDADA DE DADOS ---
 
   // 1. Prontidão
-  const rScore = findGarminData(focusData?.readiness, ['readinessValue', 'readinessScore'], 'number') ?? '--';
-  const rIndicator = findGarminData(focusData?.readiness, ['readinessIndicator', 'statusText'], 'string') ?? 'A Sincronizar';
+  const rScore = findGarminData(focusData?.readiness, ['readinessValue', 'readinessScore', 'score'], 'number') ?? '--';
+  const rIndicator = findGarminData(focusData?.readiness, ['readinessIndicator', 'statusText', 'status'], 'string') ?? 'A Sincronizar';
   
   const getReadinessColor = (val) => {
     if(val === '--') return '#5C738F';
@@ -199,15 +199,15 @@ export default function ActivitiesPanel() {
 
   // 2. Estado de Treino (Com filtro estrito pela lista oficial de estados)
   const validStatuses = Object.keys(garminColors);
-  const tStatusRaw = findGarminData(focusData?.status, ['trainingStatus', 'statusText'], 'string', validStatuses);
+  const tStatusRaw = findGarminData(focusData?.status, ['trainingStatus', 'statusText', 'trainingStatusText'], 'string', validStatuses);
   const tStatus = tStatusRaw ?? 'A Sincronizar';
   const tStatusColor = getStatusColor(tStatusRaw);
 
-  const tLoadFocus = findGarminData(focusData?.status, ['loadFocus', 'primaryLoadFocus'], 'string') ?? '--';
-  const tLoad = findGarminData(focusData?.status, ['loadStatus', 'acuteLoadStatus'], 'string') ?? '--';
-  const tHrvStatus = findGarminData(focusData?.status, ['hrvStatus', 'hrvStatusText'], 'string') ?? '--';
+  const tLoadFocus = findGarminData(focusData?.status, ['loadFocus', 'primaryLoadFocus', 'trainingLoadFocus'], 'string') ?? '--';
+  const tLoad = findGarminData(focusData?.status, ['loadStatus', 'acuteLoadStatus', 'acuteTrainingLoadStatus'], 'string') ?? '--';
+  const tHrvStatus = findGarminData(focusData?.status, ['hrvStatus', 'hrvStatusText', 'hrvStatusValue'], 'string') ?? '--';
   
-  const tVo2Raw = findGarminData(focusData?.status, ['vo2MaxValue', 'vo2Max'], 'number');
+  const tVo2Raw = findGarminData(focusData?.status, ['vo2MaxValue', 'vo2Max', 'genericVo2Max'], 'number');
   const tVo2 = typeof tVo2Raw === 'number' ? tVo2Raw.toFixed(1) : '--';
 
   // --- CÁLCULOS YTD ---

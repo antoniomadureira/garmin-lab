@@ -47,7 +47,7 @@ def _cache_set(k: str, v):
 # ── Modelos ───────────────────────────────────────────────────────
 class LoginRequest(BaseModel):
     email: str
-    password: str   # não usado; mantido para compatibilidade com o frontend
+    password: str
 
 class ChatRequest(BaseModel):
     message: str
@@ -62,15 +62,11 @@ def get_client(request: Request) -> GarminClient:
 # ── Login ─────────────────────────────────────────────────────────
 @app.post("/login")
 async def login(req: LoginRequest):
-    jwt = os.environ.get("GARMIN_JWT_WEB", "")
     sso = os.environ.get("GARMIN_SSO_GUID", "")
-
     if not sso:
         raise HTTPException(status_code=503, detail=(
-            "GARMIN_SSO_GUID não configurado no Render. "
-            "Segue as instruções em README para configurar os cookies."
+            "GARMIN_SSO_GUID não configurado no Render."
         ))
-
     try:
         client = GarminClient()
         display = await run_in_threadpool(client.get_full_name)
@@ -87,6 +83,49 @@ async def logout(request: Request):
     tok = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
     sessions.pop(tok, None)
     return {"ok": True}
+
+# ── Debug ─────────────────────────────────────────────────────────
+@app.get("/debug")
+async def debug(c: GarminClient = Depends(get_client)):
+    """Testa todos os endpoints Garmin e devolve raw responses para diagnóstico."""
+    today = date.today().strftime("%Y-%m-%d")
+    dn    = c.display_name or "me"
+    proxy = "https://connect.garmin.com/modern/proxy"
+
+    tests = [
+        ("profile",    f"{proxy}/userprofile-service/socialProfile"),
+        ("heartrate",  f"{proxy}/wellness-service/wellness/dailyHeartRate/{dn}?date={today}"),
+        ("sleep",      f"{proxy}/wellness-service/wellness/dailySleepData/{dn}?date={today}"),
+        ("steps",      f"{proxy}/wellness-service/wellness/dailySummaryChart/{dn}?startDate={today}&endDate={today}"),
+        ("stats",      f"{proxy}/userstats-service/wellness/daily/{dn}?fromDate={today}&untilDate={today}"),
+        ("bb",         f"{proxy}/wellness-service/wellness/bodyBattery/reports/daily?startDate={today}&endDate={today}"),
+        ("readiness",  f"{proxy}/metrics-service/metrics/trainingReadiness/daily/{today}"),
+        ("training",   f"{proxy}/metrics-service/metrics/performanceMetrics/daily/{dn}?fromDate={today}&untilDate={today}"),
+        ("hrv",        f"{proxy}/hrv-service/hrv/{today}"),
+    ]
+
+    def _run():
+        out = {}
+        for name, url in tests:
+            try:
+                r = c._s.get(url, timeout=10)
+                out[name] = {
+                    "status":       r.status_code,
+                    "content_type": r.headers.get("Content-Type", ""),
+                    "body_preview": r.text[:400],
+                    "is_json":      "application/json" in r.headers.get("Content-Type", ""),
+                }
+            except Exception as e:
+                out[name] = {"error": str(e)}
+        return out
+
+    results = await run_in_threadpool(_run)
+    results["_meta"] = {
+        "display_name":          dn,
+        "jwt_expires_in_seconds": round(c._jwt_exp - time.time()),
+        "cookies_set":           list(c._s.cookies.keys()),
+    }
+    return results
 
 # ── Training Focus ────────────────────────────────────────────────
 @app.get("/training-focus")
@@ -129,9 +168,9 @@ async def briefing(c: GarminClient = Depends(get_client)):
     scr = sl.get("sleepScores", {}).get("overall", {}).get("value", "N/D")
     tot = round(((sl.get("deepSleepSeconds") or 0) +
                  (sl.get("remSleepSeconds")  or 0) +
-                 (sl.get("lightSleepSeconds")or 0)) / 3600, 1)
-    st    = g["stats"]
-    rdy   = (g["ready"].get("dailyReadinessDTO") or g["ready"])
+                 (sl.get("lightSleepSeconds") or 0)) / 3600, 1)
+    st  = g["stats"]
+    rdy = (g["ready"].get("dailyReadinessDTO") or g["ready"])
     hrv_s = (g["hrv"].get("hrvSummary") or {})
 
     prompt = f"""
@@ -153,7 +192,6 @@ Dados biométricos do atleta em {d}:
 """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key: return {"briefing": "🔴 GEMINI_API_KEY não configurada."}
-
     try:
         def _ai():
             return genai.Client(api_key=api_key).models.generate_content(
@@ -198,11 +236,11 @@ async def activities(limit: int = 20, c: GarminClient = Depends(get_client)):
     try:
         raw = await run_in_threadpool(lambda: c.get_activities(0, limit))
         data = [{"activityId": a.get("activityId"),
-                 "activityName": a.get("activityName",""),
-                 "activityType": (a.get("activityType") or {}).get("typeKey","unknown"),
-                 "startTimeLocal": a.get("startTimeLocal",""),
-                 "distance": round((a.get("distance") or 0)/1000, 2),
-                 "duration": round((a.get("duration") or 0)/60, 1),
+                 "activityName": a.get("activityName", ""),
+                 "activityType": (a.get("activityType") or {}).get("typeKey", "unknown"),
+                 "startTimeLocal": a.get("startTimeLocal", ""),
+                 "distance": round((a.get("distance") or 0) / 1000, 2),
+                 "duration": round((a.get("duration") or 0) / 60, 1),
                  "calories": a.get("calories"),
                  "averageHR": a.get("averageHR")} for a in (raw or [])]
         return _cache_set(f"act_{limit}", data)
@@ -218,13 +256,13 @@ async def activities_ytd(c: GarminClient = Depends(get_client)):
     try:
         raw = await run_in_threadpool(lambda: c.get_activities_by_date(start, end))
         data = [{"activityId": a.get("activityId"),
-                 "activityName": a.get("activityName",""),
-                 "activityType": (a.get("activityType") or {}).get("typeKey","unknown"),
-                 "startTimeLocal": a.get("startTimeLocal",""),
-                 "distance": round((a.get("distance") or 0)/1000, 2),
-                 "duration": round((a.get("duration") or 0)/60, 1),
-                 "calories": a.get("calories",0),
-                 "averageHR": a.get("averageHR",0)} for a in (raw or [])]
+                 "activityName": a.get("activityName", ""),
+                 "activityType": (a.get("activityType") or {}).get("typeKey", "unknown"),
+                 "startTimeLocal": a.get("startTimeLocal", ""),
+                 "distance": round((a.get("distance") or 0) / 1000, 2),
+                 "duration": round((a.get("duration") or 0) / 60, 1),
+                 "calories": a.get("calories", 0),
+                 "averageHR": a.get("averageHR", 0)} for a in (raw or [])]
         return _cache_set(f"ytd_{start}", data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -243,7 +281,7 @@ async def heartrate_weekly(days: int = 7, c: GarminClient = Depends(get_client))
     if v := _cache_get(k): return v
     def _f():
         res, today = [], date.today()
-        for i in range(days-1, -1, -1):
+        for i in range(days - 1, -1, -1):
             dd = (today - timedelta(days=i)).strftime("%Y-%m-%d")
             try:
                 data = c.get_heart_rates(dd)
@@ -267,13 +305,13 @@ async def sleep_weekly(days: int = 7, c: GarminClient = Depends(get_client)):
     if v := _cache_get(k): return v
     def _f():
         res, today = [], date.today()
-        for i in range(days-1, -1, -1):
+        for i in range(days - 1, -1, -1):
             dd = (today - timedelta(days=i)).strftime("%Y-%m-%d")
             try:
                 raw = c.get_sleep_data(dd)
                 s   = raw.get("dailySleepDTO", {})
                 res.append({"date": dd,
-                            "sleepScore":        s.get("sleepScores",{}).get("overall",{}).get("value"),
+                            "sleepScore":        s.get("sleepScores", {}).get("overall", {}).get("value"),
                             "deepSleepSeconds":  s.get("deepSleepSeconds"),
                             "lightSleepSeconds": s.get("lightSleepSeconds"),
                             "remSleepSeconds":   s.get("remSleepSeconds"),
@@ -287,7 +325,7 @@ async def sleep_weekly(days: int = 7, c: GarminClient = Depends(get_client)):
 @app.get("/steps")
 async def steps(days: int = 7, c: GarminClient = Depends(get_client)):
     today = date.today()
-    start = (today - timedelta(days=days-1)).strftime("%Y-%m-%d")
+    start = (today - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     end   = today.strftime("%Y-%m-%d")
     k     = f"steps_{start}"
     if v := _cache_get(k): return v
@@ -304,7 +342,7 @@ async def stats(date_str: str = None, c: GarminClient = Depends(get_client)):
 @app.get("/body-battery")
 async def body_battery(days: int = 7, c: GarminClient = Depends(get_client)):
     today = date.today()
-    start = (today - timedelta(days=days-1)).strftime("%Y-%m-%d")
+    start = (today - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     end   = today.strftime("%Y-%m-%d")
     k     = f"bb_{start}"
     if v := _cache_get(k): return v
@@ -321,13 +359,11 @@ async def stress_ep(date_str: str = None, c: GarminClient = Depends(get_client))
 # ── Health ────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    has_jwt = bool(os.environ.get("GARMIN_JWT_WEB"))
-    has_sso = bool(os.environ.get("GARMIN_SSO_GUID"))
     return {
-        "status":  "ok",
-        "version": "2.0.0",
-        "auth":    "cookie-based · no OAuth · no rate limiting",
-        "garmin_jwt_configured": has_jwt,
-        "garmin_sso_configured": has_sso,
-        "sessions_active": len(sessions),
+        "status":                "ok",
+        "version":               "2.0.0",
+        "auth":                  "cookie-based · no OAuth · no rate limiting",
+        "garmin_jwt_configured": bool(os.environ.get("GARMIN_JWT_WEB")),
+        "garmin_sso_configured": bool(os.environ.get("GARMIN_SSO_GUID")),
+        "sessions_active":       len(sessions),
     }
